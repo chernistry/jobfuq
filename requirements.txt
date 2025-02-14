@@ -1,0 +1,7 @@
+openai
+playwright
+tiktoken
+tenacity
+rich
+aiohttp
+faker

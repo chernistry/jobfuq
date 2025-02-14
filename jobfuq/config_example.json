@@ -1,0 +1,31 @@
+{
+  "concurrent_details": 3,
+  "user_agents": [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/537.36",
+    "Mozilla/5.0 (Android 14; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
+    "Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/537.36"
+  ],
+  "search_queries": [
+    {
+      "keywords": "Example Job",
+      "location": "Somewhere",
+      "f_WT": "1"
+    }
+  ],
+  "linkedin_credentials": {
+    "1": {
+      "username": "user@example.com",
+      "password": "YOUR_PASSWORD_HERE"
+    }
+  },
+  "provider_mode": "together",
+  "together_api_key": "YOUR_TOGETHER_API_KEY_HERE",
+  "together_model": "deepseek-ai/DeepSeek-R1",
+  "openrouter_api_key": "YOUR_OPENROUTER_API_KEY_HERE",
+  "openrouter_model": "deepseek/deepseek-r1:free",
+  "prompt": "prompts/deepseek_r1_career_advisor_penguin_flipper.txt"
+}
