@@ -14,7 +14,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Route, Request
 from playwright._impl._browser_type import BrowserType
 from faker import Faker
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -87,6 +87,24 @@ async def apply_stealth_scripts(page: Any) -> None:
 
 
 ###############################
+# Resource Blocking
+###############################
+async def block_resources(route: Route, request: Request) -> None:
+    """
+    Blocks specific resource types from loading to improve scraping performance.
+
+    Blocks images, fonts, and media requests. Other resource types are allowed to load.
+
+    :param route: The Playwright route object.
+    :param request: The Playwright request object.
+    """
+    if request.resource_type in ["image", "font", "media"]:
+        await route.abort()
+    else:
+        await route.continue_()
+
+
+###############################
 # Enhanced Traffic Pattern Masking
 ###############################
 async def random_network_throttling(page: Any) -> None:
@@ -98,10 +116,8 @@ async def random_network_throttling(page: Any) -> None:
 
     :param page: The Playwright page instance.
     """
-    # Choose a random network profile (limited set as CDP integration is not provided)
     profiles = ['Wi-Fi', 'Regular4G', 'DSL']
     logger.debug(f"Applying random network profile: {random.choice(profiles)}")
-    # Set a random geolocation
     await page.context.set_geolocation({
         'latitude': random.uniform(-90, 90),
         'longitude': random.uniform(-180, 180)
@@ -219,10 +235,10 @@ async def handle_captcha(page: Any) -> None:
 ###############################
 async def rotate_session(context: Any) -> bool:
     """
-    Randomly rotates session cookies from stored session files.
+    Randomly rotate session cookies from stored session files.
 
     :param context: The Playwright browser context.
-    :return: True if a session was rotated, otherwise False.
+    :return: True if a session was rotated successfully, otherwise False.
     """
     session_files = [f for f in os.listdir(SESSION_STORE_DIR) if f.startswith('linkedin_session_')]
     if session_files:
@@ -244,7 +260,7 @@ async def perform_evasive_action(page: Any, confidence: float) -> None:
     Perform evasive measures if blocking indicators are detected.
 
     :param page: The Playwright page instance.
-    :param confidence: A confidence value representing the likelihood of being blocked.
+    :param confidence: A value representing the likelihood of being blocked.
     """
     logger.info(f"Performing evasive action with confidence {confidence}")
     await page.wait_for_timeout(5000)
@@ -283,7 +299,7 @@ class TrafficLight:
 
     async def monitor(self, page: Any) -> None:
         """
-        Periodically checks page performance metrics and adjusts the traffic light status.
+        Periodically check page performance metrics and adjust the traffic light status.
 
         :param page: The Playwright page instance.
         """
@@ -473,7 +489,7 @@ async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
 
 def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> Any:
     """
-    Returns an asynchronous function that waits for the LinkedIn feed to load.
+    Return an asynchronous function that waits for the LinkedIn feed to load.
 
     :param page: The Playwright page instance.
     :param timeout: Maximum wait time in milliseconds.
