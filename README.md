@@ -161,6 +161,7 @@ FROM job_listings
 WHERE is_posted = 1
 ORDER BY FS DESC;
 ```
+Ad![results.png](assets/results.png)
 
  **🚫 Filtering Out Bad Jobs**
 - Add unwanted job terms to the **blacklist**, so they won’t show up.  
