@@ -48,14 +48,19 @@ playwright install
 - **Remove `<think>` sections** for models without CoT support.  
 - Update `"prompt"` in config to **point to your file**.
 
- **4️⃣ Run JOBFUQ**  
-- **Scrape & Process Together (Recommended):**  
+**4️⃣ Run JOBFUQ**
+- **Scrape & Process Together (Recommended):**
 ```bash
-python -m jobfuq.scraper --recipe "scrap,process" --verbose
+python -m jobfuq.scraper --recipe "scrap,process" --verbose [--hours <num>]
 ```
-- **OR Run separately:**  
+- `--hours <num>`: Filter jobs by their posting time. Only jobs posted within the last `<num>` hours will be scraped.  
+  Example: `--hours 24` to scrape jobs posted in the last 24 hours.
+
+
+- **OR Run separately:**
+
 ```bash
-python -m jobfuq.scraper [--manual-login] [--debug-single] [--endless] [--verbose]
+python -m jobfuq.scraper [--manual-login] [--debug-single] [--endless] [--verbose] [--hours <num>]
 python -m jobfuq.processor [config_path] [resume_path] [--verbose] [--endless] [--threads <num>]
 ```
 
