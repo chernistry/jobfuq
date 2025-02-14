@@ -2,7 +2,8 @@
 Together Model Module
 
 This module defines the TogetherModel class, which interfaces with Together's API
-for chat completions. It enforces rate limiting and allows for additional API parameters.
+for chat completions. It enforces rate limiting (with special handling for the
+model-specific limit for "deepseek-ai/DeepSeek-R1") and allows merging of extra API parameters.
 """
 
 import aiohttp
@@ -17,9 +18,10 @@ class TogetherModel:
     """
     A model that uses Together's API for chat completions.
 
-    It enforces rate limiting based on API responses and allows merging of extra parameters.
+    It enforces rate limiting based on API responses and, for the model "deepseek-ai/DeepSeek-R1",
+    applies a model-specific limit of 6 queries per minute.
     """
-    def __init__(self, config: Dict[str, any], system_message: str) -> None:
+    def __init__(self, config: Dict[str, Any], system_message: str) -> None:
         """
         Initialize the TogetherModel.
 
@@ -29,8 +31,11 @@ class TogetherModel:
         self.api_key: str = config.get("together_api_key")
         self.model: str = config.get("together_model", "deepseek-ai/DeepSeek-R1")
         self.system_message: str = system_message
-        # Default RPM limit, can be updated later.
-        self.rpm_limit: int = config.get("together_rpm", 55)
+        # If the model is "deepseek-ai/DeepSeek-R1", enforce the model-specific limit.
+        if self.model == "deepseek-ai/DeepSeek-R1":
+            self.rpm_limit: int = 6
+        else:
+            self.rpm_limit: int = config.get("together_rpm", 55)
         self._requests: list = []
         self.window: int = 60  # seconds
         # Allow passing extra API parameters from config.
@@ -41,6 +46,7 @@ class TogetherModel:
         Query Together's auth endpoint for current rate-limit information and update rpm_limit.
 
         Expects a JSON response with a "rate_limit" field formatted like "10s".
+        For the "deepseek-ai/DeepSeek-R1" model, the limit is forced to 6 RPM.
         """
         try:
             async with aiohttp.ClientSession() as session:
@@ -51,6 +57,9 @@ class TogetherModel:
                         rate_limit_str: str = data.get("rate_limit", "10s")
                         seconds: int = int(rate_limit_str.rstrip("s"))
                         new_limit: int = int(60 / seconds)
+                        # If using the model-specific limit, enforce 6 RPM maximum.
+                        if self.model == "deepseek-ai/DeepSeek-R1":
+                            new_limit = min(new_limit, 6)
                         logger.info(f"Together rate limit updated: {new_limit} RPM (based on {rate_limit_str}).")
                         self.rpm_limit = new_limit
         except Exception as e:
@@ -111,6 +120,8 @@ class TogetherModel:
                             try:
                                 rps: float = float(ratelimit)
                                 new_rpm: int = int(rps * 60)
+                                if self.model == "deepseek-ai/DeepSeek-R1":
+                                    new_rpm = min(new_rpm, 6)
                                 if new_rpm != self.rpm_limit:
                                     logger.info(f"Together rate limit adjusted via headers: {new_rpm} RPM.")
                                     self.rpm_limit = new_rpm
