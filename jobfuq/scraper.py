@@ -33,6 +33,7 @@ from jobfuq.database import (
     insert_job, job_exists, is_company_blacklisted
 )
 from jobfuq.processor import process_and_rank_jobs
+Cfrom jobfuq.llm_handler import AIModel  # Fixed missing import
 
 SPEED_QUANTIFIER: int = 1
 
@@ -329,7 +330,6 @@ class LinkedInScraper:
                     return True
             except Exception as e:
                 logger.debug(f"Error clicking pagination '{sel}': {e}")
-
         logger.info(f"No valid pagination found for page {next_num}, stopping.")
         return False
 
@@ -372,7 +372,6 @@ class LinkedInScraper:
             return None
 
         try:
-            # Start with fallback data from search card if available.
             title: str = search_card_info.get("title", "") if search_card_info else ""
             company: str = search_card_info.get("company", "") if search_card_info else ""
             loc: str = search_card_info.get("location", "") if search_card_info else ""
