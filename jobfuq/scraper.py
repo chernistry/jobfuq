@@ -80,7 +80,7 @@ class LinkedInScraper:
         logger.info(f"Navigating to: {search_url}")
         await page.goto(search_url, wait_until="domcontentloaded")
         logger.info(f"Landed on: {page.url}")
-        await simulate_human_behavior(page)
+        # await simulate_human_behavior(page)
         logger.info("Waiting for job list container...")
 
         for sel in [".scaffold-layout__list", ".jobs-search-results"]:
@@ -368,7 +368,7 @@ class LinkedInScraper:
 
         try:
             await page.goto(jurl, wait_until="domcontentloaded")
-            await simulate_human_behavior(page)
+            # await simulate_human_behavior(page)
         except PlaywrightTimeoutError:
             logger.error(f"Timeout loading detail => job {job_id}")
             return None
@@ -624,7 +624,7 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
     try:
         logger.info("Navigating to LinkedIn feed for final cleanup.")
         await page.goto("https://www.linkedin.com/feed/", wait_until='domcontentloaded')
-        await simulate_human_behavior(page)
+        # await simulate_human_behavior(page)
     except Exception:
         pass
 
@@ -722,7 +722,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
             )
             page = await context.new_page()
             await page.route("**/*", block_resources)
-            await simulate_human_behavior(page)
+            # await simulate_human_behavior(page)
 
             if args.manual_login:
                 logger.info("Manual login selected for debug mode. Log in & press Enter in console.")
