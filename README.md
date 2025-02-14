@@ -153,15 +153,50 @@ python -m jobfuq.processor [config_path] [resume_path] [--verbose] [--endless] [
 
  **🖥️ Example: Get the Best Jobs**
 ```sql
-SELECT title AS TTL, company AS CO, ROUND(final_score, 2) AS FS,
-       skills_match AS SM, resume_similarity AS RS, final_fit_score AS FFS,
-       applicants_count AS AC, company_size_score AS CSS, success_probability AS SP,
-       confidence AS CF, effort_days_to_fit AS ED, critical_skill_mismatch_penalty AS CSMP
-FROM job_listings
-WHERE is_posted = 1
-ORDER BY FS DESC;
+WITH
+-- 📌 JOB CLASSIFICATION: Categorizes jobs into 'TOP' and 'GOOD' clusters  
+-- 🎯 'TOP' jobs have strong skill match (SK ≥ 0.70), high confidence (CF ≥ 0.70), minimal skill mismatch (PN ≤ 0.25), and quick adaptability (EF ≤ 12 days).  
+-- 🎯 'GOOD' jobs have decent skill match (SK ≥ 0.60), moderate confidence (CF ≥ 0.60), slightly higher mismatch tolerance (PN ≤ 0.30), and longer adaptation (EF ≤ 30 days).  
+JOBS AS (
+    SELECT CASE
+               WHEN skills_match >= 0.70 AND critical_skill_mismatch_penalty <= 0.25
+                   AND confidence >= 0.70 AND success_probability >= 0.65
+                   AND effort_days_to_fit <= 12 THEN 'TOP'
+               WHEN skills_match >= 0.60 AND confidence >= 0.60
+                   AND success_probability >= 0.59 AND critical_skill_mismatch_penalty <= 0.30
+                   AND effort_days_to_fit <= 30 THEN 'GOOD'
+               ELSE NULL
+               END AS CL, *
+    FROM main.job_listings
+    WHERE is_posted = 1
+),
+-- 📌 FILTER JOBS: Remove unwanted titles based on blacklist/whitelist rules  
+-- 🔍 Jobs are excluded if their title matches the blacklist and is not whitelisted  
+FILTERED_JOBS AS (
+    SELECT DISTINCT CL, id, application_status AS ST, company AS CP, title AS TT, date AS DT,
+                    ROUND(final_score, 2) AS FS, skills_match AS SK, resume_similarity AS RS,
+                    final_fit_score AS FT, applicants_count AS AP, company_size_score AS SZ,
+                    success_probability AS PR, confidence AS CF, effort_days_to_fit AS EF,
+                    critical_skill_mismatch_penalty AS PN
+    FROM JOBS
+    WHERE CL IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM blacklist bl
+        WHERE bl.type = 'blacklist' AND LOWER(JOBS.title) LIKE '%' || LOWER(bl.value) || '%'
+          AND NOT EXISTS (
+            SELECT 1 FROM blacklist wl
+            WHERE wl.type = 'whitelist' AND LOWER(JOBS.title) LIKE '%' || LOWER(wl.value) || '%'
+        )
+    )
+)
+-- 📌 FINAL SELECTION: Merge clusters while ensuring no duplicates  
+-- 📈 Orders jobs by priority (TOP first), then by skill match, confidence, and success probability  
+SELECT * FROM FILTERED_JOBS
+WHERE CL = 'TOP' OR id NOT IN (SELECT id FROM FILTERED_JOBS WHERE CL = 'TOP')
+ORDER BY CASE CL WHEN 'TOP' THEN 1 ELSE 2 END, SK DESC, CF DESC, PR DESC;
+
 ```
-Ad![results.png](assets/results.png)
+
 
  **🚫 Filtering Out Bad Jobs**
 - Add unwanted job terms to the **blacklist**, so they won’t show up.  
@@ -196,7 +231,7 @@ INSERT OR IGNORE INTO blacklist (value, type) VALUES ('Part-time', 'blacklist');
 
 #### 🤝 Contribute  
 - **Fork** → `git checkout -b feature/your-idea` → **Commit & Push** → PR 🚀
-- **MIT License** — Open source for all (yes, even mop flippers).
+- **CC BY-NC 4.0e** — Free for all (even penguin flippers), but no profit, fam. 🚫💰
 - ❓ Need Help? **GitHub Issues** or [sanderchernitsky@gmail.com](mailto:sanderchernitsky@gmail.com)
 
  ---
