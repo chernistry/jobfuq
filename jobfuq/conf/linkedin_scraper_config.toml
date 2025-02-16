@@ -1,3 +1,21 @@
+[urls]
+# Base URL for LinkedIn
+base_url = "https://www.linkedin.com"
+# Pattern for search URL; placeholders for keywords, location, and time_filter.
+search_url_pattern = "/jobs/search/?keywords={keywords}&location={location}&f_TPR={time_filter}"
+# Wait state for navigation (e.g., "domcontentloaded")
+wait_until = "domcontentloaded"
+
+[timeouts]
+# Timeout for waiting for selectors (in milliseconds)
+selector_timeout = 30000
+# Timeout for get_text_content (in milliseconds)
+get_text_timeout = 5000
+
+[attributes]
+# Attribute names to check for a job's unique ID.
+job_id = ["data-occludable-job-id", "data-job-id", "data-id"]
+
 [jobs]
 # Selectors for the overall job list container.
 job_list_selectors = [".scaffold-layout__list", ".jobs-search-results"]

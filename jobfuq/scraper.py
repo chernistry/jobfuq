@@ -2,7 +2,7 @@
 """
 LinkedIn Scraper (Enhanced)
 
-This script scrapes LinkedIn job listings using selectors loaded externally from a TOML file.
+This script scrapes LinkedIn job listings using configuration loaded externally from a TOML file.
 It supports robust selectors, predictive pagination, concurrent detail-page extraction,
 resource blocking, dynamic DOM handling, and fallback logic to adapt to structural changes.
 It also supports a debug mode to scrape a single job and exit, and an optional processing step.
@@ -27,7 +27,7 @@ from jobfuq.linked_utils import (
     ensure_logged_in, simulate_human_behavior,
     get_company_size, get_company_size_score, block_resources
 )
-from jobfuq.utils import load_config  # This function loads TOML files
+from jobfuq.utils import load_config  # Loads TOML files
 from jobfuq.database import (
     create_connection, create_table, create_blacklist_table, load_blacklist,
     insert_job, job_exists, is_company_blacklisted
@@ -46,30 +46,37 @@ class LinkedInScraper:
     A class to scrape LinkedIn job listings with multiple fallback selectors,
     concurrent detail-page extraction, and blacklist checking.
 
-    All CSS selectors are loaded dynamically from an external TOML file.
+    All variable configuration (URLs, selectors, timeouts, attributes, etc.)
+    is loaded dynamically from an external TOML file.
     """
 
     def __init__(self, config: Dict[str, Any], time_filter: str, blacklist_data: Dict[str, Any]) -> None:
         """
-        Initialize the scraper with configuration, time filter, blacklist data,
-        and load all selectors from 'jobfuq/conf/selectors_linked.toml'.
+        Initialize the scraper with general configuration, time filter, blacklist data,
+        and load all scraper configuration from 'jobfuq/conf/linkedin_scraper_config.toml'.
 
-        :param config: Configuration dictionary.
+        :param config: General configuration dictionary.
         :param time_filter: Time filter string (e.g., 'r604800').
         :param blacklist_data: Dictionary with blacklist and whitelist sets.
         """
         self.config: Dict[str, Any] = config
         self.time_filter: str = time_filter
         self.blacklist_data: Dict[str, Any] = blacklist_data
-        self.base_url: str = "https://www.linkedin.com"
-        self.company_size_cache: Dict[str, str] = {}
-        # Load selectors from the external TOML file
+        # Load all variable configuration from TOML
         try:
-            self.selectors: Dict[str, Any] = load_config("jobfuq/conf/selectors_linked.toml")
-            logger.info("Successfully loaded selectors from selectors_linked.toml")
+            self.scraper_config: Dict[str, Any] = load_config("jobfuq/conf/linkedin_scraper_config.toml")
+            logger.info("Successfully loaded scraper configuration from linkedin_scraper_config.toml")
         except Exception as e:
-            logger.error(f"Failed to load selectors file: {e}")
-            self.selectors = {}
+            logger.error(f"Failed to load scraper configuration: {e}")
+            self.scraper_config = {}
+        # Base URL is now configurable.
+        self.base_url: str = self.scraper_config.get("urls", {}).get("base_url", "https://www.linkedin.com")
+        self.wait_until: str = self.scraper_config.get("urls", {}).get("wait_until", "domcontentloaded")
+        self.selector_timeout: int = self.scraper_config.get("timeouts", {}).get("selector_timeout", 30000)
+        self.text_timeout: int = self.scraper_config.get("timeouts", {}).get("get_text_timeout", 5000)
+        self.job_id_attrs: List[str] = self.scraper_config.get("attributes", {}).get("job_id",
+                                                                                     ["data-occludable-job-id", "data-job-id", "data-id"])
+        self.company_size_cache: Dict[str, str] = {}
 
     async def search_jobs(self, page: Any, keywords: str, location: str, remote: Optional[bool] = None) -> List[Dict[str, Any]]:
         """
@@ -81,21 +88,28 @@ class LinkedInScraper:
         :param remote: Optional flag for remote jobs.
         :return: A list of job information dictionaries.
         """
-        search_url = f"{self.base_url}/jobs/search/?keywords={keywords}&location={location}&f_TPR={self.time_filter}"
+        # Build search URL using pattern from config
+        search_pattern = self.scraper_config.get("urls", {}).get("search_url_pattern",
+                                                                 "/jobs/search/?keywords={keywords}&location={location}&f_TPR={time_filter}")
+        search_url = self.base_url + search_pattern.format(
+            keywords=keywords,
+            location=location,
+            time_filter=self.time_filter
+        )
         if remote is True:
             search_url += "&f_WT=2"
         elif remote is False:
             search_url += "&f_WT=1"
         logger.info(f"Navigating to: {search_url}")
-        await page.goto(search_url, wait_until="domcontentloaded")
+        await page.goto(search_url, wait_until=self.wait_until)
         logger.info(f"Landed on: {page.url}")
         logger.info("Waiting for job list container...")
 
-        # Use job list selectors from the TOML file
-        job_list_selectors = self.selectors.get("jobs", {}).get("job_list_selectors", [])
+        # Use job list selectors from config
+        job_list_selectors = self.scraper_config.get("jobs", {}).get("job_list_selectors", [])
         for sel in job_list_selectors:
             try:
-                await page.wait_for_selector(sel, timeout=30000)
+                await page.wait_for_selector(sel, timeout=self.selector_timeout)
                 logger.info(f"Job list found with selector => {sel}")
                 break
             except PlaywrightTimeoutError:
@@ -143,8 +157,7 @@ class LinkedInScraper:
         results: List[Dict[str, Any]] = []
         logger.info("Extracting job cards from current page...")
 
-        # Use job card selectors from TOML
-        card_selectors = self.selectors.get("jobs", {}).get("job_card_selectors", [])
+        card_selectors = self.scraper_config.get("jobs", {}).get("job_card_selectors", [])
         job_cards: List[Any] = []
         for sel in card_selectors:
             try:
@@ -163,17 +176,16 @@ class LinkedInScraper:
         blacklist: set = self.blacklist_data.get("blacklist", set())
         whitelist: set = self.blacklist_data.get("whitelist", set())
 
-        # Load card-level selectors for title, company, etc.
-        title_selectors = self.selectors.get("card", {}).get("title_selectors", [])
-        company_selectors = self.selectors.get("card", {}).get("company_selectors", [])
-        location_selectors = self.selectors.get("card", {}).get("location_selectors", [])
-        snippet_selectors = self.selectors.get("card", {}).get("snippet_selectors", [])
-        applicants_selectors = self.selectors.get("card", {}).get("applicants_selectors", [])
-        company_size_selectors = self.selectors.get("card", {}).get("company_size_selectors", [])
+        # Load card-level selectors for various fields from config
+        title_selectors = self.scraper_config.get("card", {}).get("title_selectors", [])
+        company_selectors = self.scraper_config.get("card", {}).get("company_selectors", [])
+        location_selectors = self.scraper_config.get("card", {}).get("location_selectors", [])
+        snippet_selectors = self.scraper_config.get("card", {}).get("snippet_selectors", [])
+        applicants_selectors = self.scraper_config.get("card", {}).get("applicants_selectors", [])
+        company_size_selectors = self.scraper_config.get("card", {}).get("company_size_selectors", [])
 
         for card in job_cards:
             title_elem = None
-            # Try each title selector from TOML
             for sel in title_selectors:
                 title_elem = await card.query_selector(sel)
                 if title_elem:
@@ -191,7 +203,6 @@ class LinkedInScraper:
                 logger.warning(f"Skipping job due to missing job ID: '{title}'")
                 continue
 
-            # Extract company name using selectors
             company = ""
             for sel in company_selectors:
                 elem = await card.query_selector(sel)
@@ -200,7 +211,6 @@ class LinkedInScraper:
                     if company:
                         break
 
-            # Extract location
             loc = ""
             for sel in location_selectors:
                 elem = await card.query_selector(sel)
@@ -209,7 +219,6 @@ class LinkedInScraper:
                     if loc:
                         break
 
-            # Extract brief description/snippet
             descr = ""
             for sel in snippet_selectors:
                 elem = await card.query_selector(sel)
@@ -218,7 +227,6 @@ class LinkedInScraper:
                     if descr:
                         break
 
-            # Extract applicants count
             applicants_count = None
             for sel in applicants_selectors:
                 elem = await card.query_selector(sel)
@@ -229,7 +237,6 @@ class LinkedInScraper:
                         applicants_count = int(match.group(1))
                         break
 
-            # Extract company size
             csize = None
             for sel in company_size_selectors:
                 elem = await card.query_selector(sel)
@@ -255,12 +262,12 @@ class LinkedInScraper:
 
     async def extract_job_id(self, card: Any) -> Optional[str]:
         """
-        Extract the job ID from a job card element using various attributes.
+        Extract the job ID from a job card element using attribute names from config.
 
         :param card: The job card element.
         :return: The job ID string if found, otherwise None.
         """
-        for attr in ["data-occludable-job-id", "data-job-id", "data-id"]:
+        for attr in self.job_id_attrs:
             val = await card.get_attribute(attr)
             if val:
                 return val
@@ -268,8 +275,7 @@ class LinkedInScraper:
 
     async def go_to_next_page(self, page: Any, current_page: int) -> bool:
         """
-        Attempt to navigate to the next page of job listings by clicking on pagination buttons.
-        Selectors are loaded from the TOML file and formatted with the target page number.
+        Navigate to the next page by clicking pagination buttons using selectors from config.
 
         :param page: The Playwright page instance.
         :param current_page: The current page number.
@@ -278,9 +284,8 @@ class LinkedInScraper:
         next_num: int = current_page + 1
         logger.info(f"Attempting to go to next page => Page {next_num}")
 
-        pagination_selectors = self.selectors.get("pagination", {}).get("selectors", [])
+        pagination_selectors = self.scraper_config.get("pagination", {}).get("selectors", [])
         for sel in pagination_selectors:
-            # Format the selector if it contains a placeholder
             try:
                 formatted_sel = sel.format(page=next_num)
             except Exception:
@@ -294,7 +299,7 @@ class LinkedInScraper:
                         continue
                     logger.info(f"Clicking pagination => '{formatted_sel}'")
                     await btn.click()
-                    await page.wait_for_load_state("domcontentloaded")
+                    await page.wait_for_load_state(self.wait_until)
                     await asyncio.sleep(2)
                     return True
             except Exception as e:
@@ -305,12 +310,12 @@ class LinkedInScraper:
 
     async def get_field_content(self, page: Any, selectors: List[str], default: str = "") -> str:
         """
-        Iterate over a list of selectors and return the text content from the first element found.
+        Return the text content from the first element found among a list of selectors.
 
         :param page: The Playwright page instance.
-        :param selectors: A list of CSS selectors.
-        :param default: The default text if none found.
-        :return: The extracted text content.
+        :param selectors: List of CSS selectors.
+        :param default: Default text if none found.
+        :return: Extracted text content.
         """
         for sel in selectors:
             content = await self.get_text_content(page, sel, default="")
@@ -320,19 +325,18 @@ class LinkedInScraper:
 
     async def get_job_details(self, page: Any, job_id: str, search_card_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """
-        Load the full job detail page and extract additional information using selectors from the TOML file.
+        Load the full job detail page and extract additional information using selectors from config.
 
         :param page: The Playwright page instance.
-        :param job_id: The job's unique identifier.
-        :param search_card_info: Fallback information from the search results.
-        :return: A dictionary of job details, or None on failure.
+        :param job_id: The unique job identifier.
+        :param search_card_info: Fallback info from search results.
+        :return: Dictionary of job details or None on failure.
         """
         jurl: str = f"{self.base_url}/jobs/view/{job_id}/"
         logger.info(f"Navigating to job detail => {jurl}")
 
         try:
-            await page.goto(jurl, wait_until="domcontentloaded")
-            # Optionally: await simulate_human_behavior(page)
+            await page.goto(jurl, wait_until=self.wait_until)
         except PlaywrightTimeoutError:
             logger.error(f"Timeout loading detail => job {job_id}")
             return None
@@ -341,8 +345,7 @@ class LinkedInScraper:
             return None
 
         try:
-            # Load detail selectors from TOML
-            detail = self.selectors.get("detail", {})
+            detail = self.scraper_config.get("detail", {})
             title_selectors = detail.get("title_selectors", [])
             company_selectors = detail.get("company_selectors", [])
             location_selectors = detail.get("location_selectors", [])
@@ -403,15 +406,15 @@ class LinkedInScraper:
 
     async def get_text_content(self, page: Any, selector: str, default: str = "") -> str:
         """
-        Try to extract text content from an element using a given selector.
+        Attempt to extract text content from an element via a given selector.
 
         :param page: The Playwright page instance.
-        :param selector: CSS selector to locate the element.
-        :param default: Default text to return if extraction fails.
-        :return: The text content or default.
+        :param selector: CSS selector.
+        :param default: Default text if extraction fails.
+        :return: Extracted text content.
         """
         try:
-            el = await page.wait_for_selector(selector, timeout=5000)
+            el = await page.wait_for_selector(selector, timeout=self.text_timeout)
             if el:
                 txt = await el.text_content()
                 if txt:
@@ -426,8 +429,8 @@ class LinkedInScraper:
         """
         Parse a posting date string and return a normalized date in 'YYYY-MM-DD' format.
 
-        :param posted_time: The raw posted time string.
-        :return: The normalized date string.
+        :param posted_time: Raw posted time string.
+        :return: Normalized date string.
         """
         if not posted_time:
             return datetime.now().strftime('%Y-%m-%d')
@@ -449,10 +452,10 @@ class LinkedInScraper:
 
     def clean_html(self, txt: str) -> str:
         """
-        Remove HTML tags and excess whitespace from a text string.
+        Remove HTML tags and extra whitespace from a string.
 
-        :param txt: The raw HTML text.
-        :return: The cleaned text.
+        :param txt: Raw HTML text.
+        :return: Cleaned text.
         """
         if not txt:
             return ""
@@ -462,10 +465,10 @@ class LinkedInScraper:
 
 async def evaluate_job(ai_model: AIModel, job: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Evaluate a job by merging the original job data with AI evaluation results.
+    Evaluate a job by merging original job data with AI evaluation results.
 
-    :param ai_model: An instance of AIModel.
-    :param job: A dictionary containing the original job data.
+    :param ai_model: Instance of AIModel.
+    :param job: Dictionary containing the job data.
     :return: Combined job data and evaluation metrics.
     """
     evaluation: Dict[str, Any] = await ai_model.evaluate_job_fit(job)
@@ -474,14 +477,14 @@ async def evaluate_job(ai_model: AIModel, job: Dict[str, Any]) -> Dict[str, Any]
 
 async def run_scrape(config: Dict[str, Any], browser: Any, search_queries: List[Dict[str, Any]], manual_login: bool, endless: bool = False) -> None:
     """
-    Main function to run job scraping. It yields job dictionaries as it finds them.
-    In endless mode, it loops indefinitely, waiting 60 seconds between rounds.
+    Main function to run job scraping. Yields job dictionaries as found.
+    In endless mode, loops indefinitely with a pause between rounds.
 
-    :param config: Configuration dictionary.
-    :param browser: The Playwright browser instance.
+    :param config: General configuration dictionary.
+    :param browser: Playwright browser instance.
     :param search_queries: List of search query dictionaries.
     :param manual_login: Whether to use manual login.
-    :param endless: If True, continue scraping indefinitely.
+    :param endless: If True, scrape continuously.
     """
     if endless:
         while True:
@@ -496,11 +499,11 @@ async def run_scrape(config: Dict[str, Any], browser: Any, search_queries: List[
 
 async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: List[Dict[str, Any]], manual_login: bool = False) -> Any:
     """
-    Creates a browser context, logs in (or uses manual login), then iterates over each search query,
-    extracting job data. Yields job data as dictionaries.
+    Create a browser context, log in, and iterate over each search query to extract job data.
+    Yields job data as dictionaries.
 
-    :param config: Configuration dictionary.
-    :param browser: The Playwright browser instance.
+    :param config: General configuration dictionary.
+    :param browser: Playwright browser instance.
     :param search_queries: List of search query dictionaries.
     :param manual_login: Whether to use manual login.
     :return: Yields job data dictionaries.
@@ -519,7 +522,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
         user_agent=random.choice(config.get('user_agents', ["Mozilla/5.0"]))
     )
     page = await context.new_page()
-    # Register resource blocking on this page
     await page.route("**/*", block_resources)
 
     if manual_login:
@@ -552,7 +554,7 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
         job_infos = await scraper.search_jobs(page, kw, loc, remote)
         detail_tasks = []
         for info in job_infos:
-            job_url = f"https://www.linkedin.com/jobs/view/{info['job_id']}/"
+            job_url = f"{self.base_url}/jobs/view/{info['job_id']}/"
             if job_exists(conn, job_url):
                 logger.debug(f"Skipping existing => {job_url}")
                 continue
@@ -564,7 +566,7 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
 
     try:
         logger.info("Navigating to LinkedIn feed for final cleanup.")
-        await page.goto("https://www.linkedin.com/feed/", wait_until='domcontentloaded')
+        await page.goto("https://www.linkedin.com/feed/", wait_until=self.wait_until)
     except Exception:
         pass
 
@@ -582,20 +584,19 @@ async def fetch_job_detail_task(
         sem: asyncio.Semaphore
 ) -> Optional[Dict[str, Any]]:
     """
-    Concurrently fetch job detail using the LinkedInScraper for each job card info.
+    Concurrently fetch job detail for each job card.
     Applies blacklist checks and inserts the job into the database if valid.
 
-    :param scraper: An instance of LinkedInScraper.
+    :param scraper: Instance of LinkedInScraper.
     :param info: Dictionary containing basic job info.
     :param conn: Database connection.
-    :param parent_context: The browser context.
+    :param parent_context: Browser context.
     :param blacklist: Dictionary with blacklist and whitelist sets.
     :param sem: Concurrency semaphore.
-    :return: A dictionary with detailed job data if successful, otherwise None.
+    :return: Dictionary with detailed job data if successful, else None.
     """
     async with sem:
         page = await parent_context.new_page()
-        # Register resource blocking for detail pages
         await page.route("**/*", block_resources)
         try:
             job_id = info['job_id']
@@ -630,7 +631,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
     """
     Main entry point to run scraping and/or processing.
 
-    :param args: The parsed command-line arguments.
+    :param args: Parsed command-line arguments.
     """
     config = load_config("jobfuq/conf/config.toml")
     if args.hours is not None:
@@ -645,7 +646,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False, slow_mo=50)
 
-        # Debug mode: scrape a single job and exit.
         if args.debug_single:
             logger.info("Debug mode enabled: Scraping a single job and exiting.")
             conn = create_connection(config)
@@ -701,7 +701,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
             await browser.close()
             return
 
-        # Normal operation mode.
         recipe = args.recipe.split(",") if args.recipe else ["scrap", "process"]
         tasks = []
         if "scrap" in recipe:
@@ -727,7 +726,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Advanced LinkedIn Scraper: robust pagination, dynamic selectors, and concurrent job detail extraction.",
+        description="Advanced LinkedIn Scraper: robust pagination, dynamic selectors, and configurable parameters.",
         add_help=False
     )
     parser.add_argument("-h", "--hours", type=int, help="Time filter in hours (e.g., 6, 12, 24).", default=None)
