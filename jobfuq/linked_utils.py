@@ -18,7 +18,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Route, Request
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Route, Request, async_playwright
 from playwright._impl._browser_type import BrowserType
 from faker import Faker
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -160,7 +160,6 @@ async def random_network_throttling(page: Any) -> None:
         'latitude': random.uniform(-90, 90),
         'longitude': random.uniform(-180, 180)
     })
-
 async def fake_http_traffic(page: Any) -> None:
     """
     Simulate additional benign HTTP traffic.
@@ -170,9 +169,12 @@ async def fake_http_traffic(page: Any) -> None:
     :param page: The Playwright page instance.
     """
     fake_http_url = linked_config.get("fake_http", {}).get("url", "https://httpbin.org/get")
+
     try:
-        async with page.context.request.new_context() as req_context:
-            await req_context.get(fake_http_url)
+        async with async_playwright() as p:
+            async with p.request.new_context() as req_context:
+                response = await req_context.get(fake_http_url)
+                logger.debug(f"Fake HTTP traffic response: {response.status} - {await response.text()}")
     except Exception as e:
         logger.debug(f"Fake HTTP traffic error: {e}")
 

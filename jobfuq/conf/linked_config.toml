@@ -115,8 +115,34 @@ company_size_selectors = [
 ]
 applicants_detail_selectors = [
     "span.jobs-unified-top-card__applicant-count",
-    "span.job-card-container__applicant-count"
+    "span.job-card-container__applicant-count",
+    ".jobs-details-top-card__applicant-count",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping span:has-text('applicant')",
+    "span.tvm__text.tvm__text--low-emphasis",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping"
 ]
+
+#######################################
+#      APPLICANTS UPDATE SETTINGS     #
+#######################################
+[applicants_update]
+
+selectors = [
+    ".jobs-details-top-card__applicant-count",
+    ".jobs-unified-top-card__applicant-count",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping span:has-text(\"applicant\")",
+    "span.tvm__text.tvm__text--low-emphasis",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping"
+]
+
+patterns = [
+    "(\\d+)\\s*(?:applicant|candidate|people|person)s?\\b",
+    "(\\d+)\\s*people clicked apply",
+    "Over\\s+(\\d+)",
+    "Be among the first (\\d+) applicants",
+    "(\\d+)\\s*clicked apply"
+]
+
 
 #######################################
 #        PAGINATION SETTINGS          #

@@ -36,7 +36,6 @@ from jobfuq.database import (
 from jobfuq.processor import process_and_rank_jobs
 from jobfuq.llm_handler import AIModel
 
-SPEED_QUANTIFIER: int = 1
 
 
 # ------------------------------------------------------------------------------
@@ -134,7 +133,7 @@ class LinkedInScraper:
             old_count: int = len(job_infos)
             # Basic scroll
             await page.evaluate("window.scrollBy(0, 5000)")
-            await asyncio.sleep(random.uniform(2, 3) * SPEED_QUANTIFIER)
+            await asyncio.sleep(random.uniform(2, 3))
             new_infos_2 = await self.extract_job_infos(page)
             job_infos.extend(new_infos_2)
             job_infos = list({x["job_id"]: x for x in job_infos}.values())
@@ -149,6 +148,23 @@ class LinkedInScraper:
                 page_num += 1
 
         return job_infos[:max_postings]
+
+    async def extract_applicants_count(self, card: Any) -> Optional[int]:
+        """
+        Extract the applicants count from a job card element using selectors from config.
+
+        :param card: The job card element.
+        :return: The number of applicants as an integer, or None if not found.
+        """
+        selectors = self.scraper_config.get("card", {}).get("applicants_selectors", [])
+        for sel in selectors:
+            elem = await card.query_selector(sel)
+            if elem:
+                text = (await elem.text_content()) or ""
+                match = re.search(r'(\d+)', text)
+                if match:
+                    return int(match.group(1))
+        return None
 
     async def extract_job_infos(self, page: Any) -> List[Dict[str, Any]]:
         """
@@ -184,7 +200,6 @@ class LinkedInScraper:
         company_selectors = self.scraper_config.get("card", {}).get("company_selectors", [])
         location_selectors = self.scraper_config.get("card", {}).get("location_selectors", [])
         snippet_selectors = self.scraper_config.get("card", {}).get("snippet_selectors", [])
-        applicants_selectors = self.scraper_config.get("card", {}).get("applicants_selectors", [])
         company_size_selectors = self.scraper_config.get("card", {}).get("company_size_selectors", [])
 
         for card in job_cards:
@@ -230,15 +245,7 @@ class LinkedInScraper:
                     if descr:
                         break
 
-            applicants_count = None
-            for sel in applicants_selectors:
-                elem = await card.query_selector(sel)
-                if elem:
-                    text = (await elem.text_content()) or ""
-                    match = re.search(r'(\d+)', text)
-                    if match:
-                        applicants_count = int(match.group(1))
-                        break
+            applicants_count = await self.extract_applicants_count(card)
 
             csize = None
             for sel in company_size_selectors:
@@ -466,6 +473,74 @@ class LinkedInScraper:
         c = re.sub(r"<[^>]+>", "", txt)
         return re.sub(r"\s+", " ", c).strip()
 
+    async def update_existing_job(self, conn, job_url: str, page: Any) -> Optional[Dict[str, Any]]:
+        """
+        For a job that is already in the database, recheck its applicants count and application status.
+        Navigates to the job URL, extracts updated applicant data using legacy-style selectors/patterns,
+        and updates the database record accordingly.
+
+        :param conn: SQLite database connection.
+        :param job_url: The URL of the job to update.
+        :param page: A Playwright page instance.
+        :return: A dictionary with updated job information, or None if update fails.
+        """
+        try:
+            logger.info(f"Updating existing job: {job_url}")
+            await page.goto(job_url, wait_until=self.wait_until, timeout=30000)
+            await simulate_human_behavior(page)
+            # Get selectors and patterns from config under [applicants_update]
+            selectors = self.scraper_config.get("applicants_update", {}).get("selectors", [
+                ".jobs-details-top-card__applicant-count",
+                ".jobs-unified-top-card__applicant-count",
+                "span.jobs-unified-top-card__subtitle-secondary-grouping span:has-text('applicant')",
+                "span.tvm__text.tvm__text--low-emphasis",
+                "span.jobs-unified-top-card__subtitle-secondary-grouping"
+            ])
+            patterns = self.scraper_config.get("applicants_update", {}).get("patterns", [
+                r'(\d+)\s*(?:applicant|candidate|people|person)s?\b',
+                r'(\d+)\s*people clicked apply',
+                r'Over\s+(\d+)',
+                r'Be among the first (\d+) applicants',
+                r'(\d+)\s*clicked apply'
+            ])
+            applicants_count = None
+            for s in selectors:
+                try:
+                    els = await page.query_selector_all(s)
+                    for e in els:
+                        txt = await e.inner_text()
+                        for p in patterns:
+                            m = re.search(p, txt, re.IGNORECASE)
+                            if m:
+                                applicants_count = int(m.group(1))
+                                break
+                        if applicants_count is not None:
+                            break
+                    if applicants_count is not None:
+                        break
+                except Exception:
+                    continue
+            if applicants_count is None:
+                content = await page.content()
+                for p in patterns:
+                    m = re.search(p, content, re.IGNORECASE)
+                    if m:
+                        applicants_count = int(m.group(1))
+                        break
+            # Determine if job is still accepting applications
+            not_accept = await page.query_selector('text=No longer accepting applications')
+            accepting = not not_accept
+            current_time = int(time.time() * 1000)
+            status = "closed" if not accepting else "not applied"
+            conn.execute("UPDATE job_listings SET applicants_count = ?, last_checked = ?, application_status = ? WHERE job_url = ?",
+                         (applicants_count, current_time, status, job_url))
+            conn.commit()
+            logger.info(f"Updated job {job_url}: applicants_count={applicants_count}, status={status}")
+            return {"job_url": job_url, "applicants_count": applicants_count, "application_status": status, "last_checked": current_time}
+        except Exception as e:
+            logger.error(f"Error updating job {job_url}: {e}")
+            return None
+
 
 async def evaluate_job(ai_model: AIModel, job: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -505,6 +580,9 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
     """
     Create a browser context, log in, and iterate over each search query to extract job data.
     Yields job data as dictionaries.
+
+    Also, for jobs already in the database, if the last_checked timestamp is older than one day,
+    re-fetch and update the applicant count and application status.
 
     :param config: General configuration dictionary.
     :param browser: Playwright browser instance.
@@ -550,24 +628,31 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
     max_parallel = config.get("concurrent_details", 1)
     semaphore = asyncio.Semaphore(max_parallel)
 
-    for query in search_queries:
-        kw = query["keywords"]
-        loc = query["location"]
-        remote = query.get("remote")
-        logger.info(f"Scraping => kw={kw}, loc={loc}, remote={remote}")
-        job_infos = await scraper.search_jobs(page, kw, loc, remote)
-        detail_tasks = []
-        for info in job_infos:
-            # Use scraper.base_url for consistency
-            job_url = f"{scraper.base_url}/jobs/view/{info['job_id']}/"
-            if job_exists(conn, job_url):
-                logger.debug(f"Skipping existing => {job_url}")
-                continue
-            detail_tasks.append(fetch_job_detail_task(scraper, info, conn, page.context, blacklist, semaphore))
-        results = await asyncio.gather(*detail_tasks, return_exceptions=True)
-        for r in results:
-            if isinstance(r, dict):
-                yield r
+    for info in await scraper.search_jobs(page, *(q.values() for q in search_queries).__next__()):
+        job_url = f"{scraper.base_url}/jobs/view/{info['job_id']}/"
+        if job_exists(conn, job_url):
+            # Check if the job record is older than one day (86,400,000 ms)
+            cursor = conn.execute("SELECT last_checked FROM job_listings WHERE job_url = ?", (job_url,))
+            row = cursor.fetchone()
+            current_time = int(time.time() * 1000)
+            if row is None or row[0] is None or (current_time - row[0]) > 86400000:
+                logger.info(f"Job {job_url} is older than a day; updating applicants count...")
+                update_page = await context.new_page()
+                await update_page.route("**/*", block_resources)
+                updated_job = await scraper.update_existing_job(conn, job_url, update_page)
+                await update_page.close()
+                if updated_job:
+                    yield updated_job
+            else:
+                logger.debug(f"Job {job_url} exists and was recently checked; skipping update.")
+            continue
+
+        # If job is not in DB, schedule detail extraction.
+        yield_item = None  # will be set by detail task
+        async with semaphore:
+            detail = await fetch_job_detail_task(scraper, info, conn, page.context, blacklist, semaphore)
+            if detail:
+                yield detail
 
     try:
         logger.info("Navigating to LinkedIn feed for final cleanup.")
