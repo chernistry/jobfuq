@@ -13,7 +13,7 @@ import asyncio
 import time
 import math
 import random
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 import tiktoken
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -21,7 +21,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from jobfuq.logger import logger
 from jobfuq.models.together import TogetherModel
 from jobfuq.models.openrouter import OpenRouterModel
-
 
 class ProviderManager:
     """
@@ -34,10 +33,11 @@ class ProviderManager:
         """
         Initialize the ProviderManager with configuration settings.
 
-        :param config: Configuration dictionary containing 'provider_mode'.
+        :param config: Configuration dictionary containing 'ai_providers' settings.
         """
         self.config: Dict[str, Any] = config
-        mode: str = config.get("provider_mode", "openrouter").strip().lower()
+        # Read provider_mode from the nested ai_providers config.
+        mode: str = config.get("ai_providers", {}).get("provider_mode", "openrouter").strip().lower()
         if mode == "together":
             self.providers = ["together"]
         elif mode == "openrouter":
@@ -99,7 +99,6 @@ class ProviderManager:
                     self.together_jobs_remaining = self.current_step + 1
         else:
             logger.error(f"Failure reported for unknown provider '{provider}'.")
-
 
 class AIModel:
     """
@@ -291,7 +290,6 @@ class AIModel:
             logger.warning("Extraction failure: all numeric scores 0.0 with no explanation.")
             return self.create_error_response("Extraction failed.")
         return result
-
 
 async def evaluate_job(ai_model: AIModel, job: Dict[str, Any]) -> Dict[str, Any]:
     """

@@ -13,7 +13,6 @@ from typing import Dict, Any
 
 from jobfuq.logger import logger
 
-
 class TogetherModel:
     """
     A model that uses Together's API for chat completions.
@@ -28,18 +27,20 @@ class TogetherModel:
         :param config: A configuration dictionary containing API keys, model name, and extra parameters.
         :param system_message: The system message to include in every prompt.
         """
-        self.api_key: str = config.get("together_api_key")
-        self.model: str = config.get("together_model", "deepseek-ai/DeepSeek-R1")
+        # Read AI provider settings from the nested config.
+        ai_config = config.get("ai_providers", {})
+        self.api_key: str = ai_config.get("together_api_key")
+        self.model: str = ai_config.get("together_model", "deepseek-ai/DeepSeek-R1")
         self.system_message: str = system_message
         # If the model is "deepseek-ai/DeepSeek-R1", enforce the model-specific limit.
         if self.model == "deepseek-ai/DeepSeek-R1":
             self.rpm_limit: int = 6
         else:
-            self.rpm_limit: int = config.get("together_rpm", 55)
+            self.rpm_limit: int = ai_config.get("together_rpm", 55)
         self._requests: list = []
         self.window: int = 60  # seconds
         # Allow passing extra API parameters from config.
-        self.extra_params: Dict[str, Any] = config.get("together_extra_params", {})
+        self.extra_params: Dict[str, Any] = ai_config.get("together_extra_params", {})
 
     async def _update_rate_limit(self) -> None:
         """
