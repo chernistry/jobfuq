@@ -786,8 +786,12 @@ async def main_scraper(args: argparse.Namespace) -> None:
         [{"keywords": "Master of Internet Surfing", "location": "Netherlands", "remote": None}]
     )
 
+    # Load headless mode from config (default: False)
+    headless_mode = config.get("headless", False)
+    logger.info(f"Launching browser with headless={headless_mode}")
+
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, slow_mo=50)
+        browser = await p.chromium.launch(headless=headless_mode, slow_mo=50)
 
         if args.debug_single:
             logger.info("Debug mode enabled: Possibly scraping a single job link or one job from search.")
