@@ -2,10 +2,11 @@
 """
 LinkedIn Scraper (Enhanced)
 
-This script scrapes LinkedIn job listings using configuration loaded externally from a TOML file.
-It supports robust selectors, predictive pagination, concurrent detail-page extraction,
-resource blocking, dynamic DOM handling, and fallback logic to adapt to structural changes.
-It also supports a debug mode to scrape a single job and exit, and an optional processing step.
+Scrapes LinkedIn job listings using Playwright.
+Loads main config from config.toml and LinkedIn-specific config from linked_config.toml.
+Supports robust selectors, predictive pagination, concurrent detail-page extraction,
+resource blocking, dynamic DOM handling, and fallback logic.
+Also supports a debug mode to scrape a single job and exit, and an optional processing step.
 """
 
 import asyncio
@@ -47,7 +48,7 @@ class LinkedInScraper:
     concurrent detail-page extraction, and blacklist checking.
 
     All variable configuration (URLs, selectors, timeouts, attributes, etc.)
-    is loaded dynamically from an external TOML file.
+    is loaded dynamically from an external TOML file (linked_config.toml).
     """
 
     def __init__(self, config: Dict[str, Any], time_filter: str, blacklist_data: Dict[str, Any]) -> None:
@@ -62,7 +63,7 @@ class LinkedInScraper:
         self.config: Dict[str, Any] = config
         self.time_filter: str = time_filter
         self.blacklist_data: Dict[str, Any] = blacklist_data
-        # Load all variable configuration from TOML
+        # Load the "linked" config from the renamed file
         try:
             self.scraper_config: Dict[str, Any] = load_config("jobfuq/conf/linked_config.toml")
             logger.info("Successfully loaded scraper configuration from linked_config.toml")
@@ -75,7 +76,8 @@ class LinkedInScraper:
         self.selector_timeout: int = self.scraper_config.get("timeouts", {}).get("selector_timeout", 30000)
         self.text_timeout: int = self.scraper_config.get("timeouts", {}).get("get_text_timeout", 5000)
         self.job_id_attrs: List[str] = self.scraper_config.get("attributes", {}).get("job_id",
-                                                                                     ["data-occludable-job-id", "data-job-id", "data-id"])
+                                                                                     ["data-occludable-job-id", "data-job-id", "data-id"]
+                                                                                     )
         self.company_size_cache: Dict[str, str] = {}
 
     async def search_jobs(self, page: Any, keywords: str, location: str, remote: Optional[bool] = None) -> List[Dict[str, Any]]:
@@ -339,7 +341,6 @@ class LinkedInScraper:
         try:
             await page.goto(jurl, wait_until=self.wait_until)
             await simulate_human_behavior(page)
-
         except PlaywrightTimeoutError:
             logger.error(f"Timeout loading detail => job {job_id}")
             return None
@@ -557,7 +558,8 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
         job_infos = await scraper.search_jobs(page, kw, loc, remote)
         detail_tasks = []
         for info in job_infos:
-            job_url = f"{self.base_url}/jobs/view/{info['job_id']}/"
+            # Use scraper.base_url for consistency
+            job_url = f"{scraper.base_url}/jobs/view/{info['job_id']}/"
             if job_exists(conn, job_url):
                 logger.debug(f"Skipping existing => {job_url}")
                 continue
@@ -569,9 +571,8 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
 
     try:
         logger.info("Navigating to LinkedIn feed for final cleanup.")
-        await page.goto("https://www.linkedin.com/feed/", wait_until=self.wait_until)
+        await page.goto("https://www.linkedin.com/feed/", wait_until=scraper.wait_until)
         await simulate_human_behavior(page)
-
     except Exception:
         pass
 
