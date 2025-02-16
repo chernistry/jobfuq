@@ -2,12 +2,10 @@
 """
 LinkedIn Scraper (Enhanced)
 
-This script scrapes LinkedIn job listings using robust selectors, predictive pagination,
-and concurrent detail-page extraction. It includes resource blocking, dynamic DOM handling,
-and fallback logic to maximize data extraction even when the page structure changes.
-
-It supports a debug mode to scrape a single job and exit, and can also run a processing step
-(via `process_and_rank_jobs`) after scraping if instructed via the `--recipe` argument.
+This script scrapes LinkedIn job listings using selectors loaded externally from a TOML file.
+It supports robust selectors, predictive pagination, concurrent detail-page extraction,
+resource blocking, dynamic DOM handling, and fallback logic to adapt to structural changes.
+It also supports a debug mode to scrape a single job and exit, and an optional processing step.
 """
 
 import asyncio
@@ -29,8 +27,7 @@ from jobfuq.linked_utils import (
     ensure_logged_in, simulate_human_behavior,
     get_company_size, get_company_size_score, block_resources
 )
-from jobfuq.utils import load_config
-
+from jobfuq.utils import load_config  # This function loads TOML files
 from jobfuq.database import (
     create_connection, create_table, create_blacklist_table, load_blacklist,
     insert_job, job_exists, is_company_blacklisted
@@ -48,11 +45,14 @@ class LinkedInScraper:
     """
     A class to scrape LinkedIn job listings with multiple fallback selectors,
     concurrent detail-page extraction, and blacklist checking.
+
+    All CSS selectors are loaded dynamically from an external TOML file.
     """
 
     def __init__(self, config: Dict[str, Any], time_filter: str, blacklist_data: Dict[str, Any]) -> None:
         """
-        Initialize the scraper with configuration, time filter, and blacklist data.
+        Initialize the scraper with configuration, time filter, blacklist data,
+        and load all selectors from 'jobfuq/conf/selectors_linked.toml'.
 
         :param config: Configuration dictionary.
         :param time_filter: Time filter string (e.g., 'r604800').
@@ -63,6 +63,13 @@ class LinkedInScraper:
         self.blacklist_data: Dict[str, Any] = blacklist_data
         self.base_url: str = "https://www.linkedin.com"
         self.company_size_cache: Dict[str, str] = {}
+        # Load selectors from the external TOML file
+        try:
+            self.selectors: Dict[str, Any] = load_config("jobfuq/conf/selectors_linked.toml")
+            logger.info("Successfully loaded selectors from selectors_linked.toml")
+        except Exception as e:
+            logger.error(f"Failed to load selectors file: {e}")
+            self.selectors = {}
 
     async def search_jobs(self, page: Any, keywords: str, location: str, remote: Optional[bool] = None) -> List[Dict[str, Any]]:
         """
@@ -82,10 +89,11 @@ class LinkedInScraper:
         logger.info(f"Navigating to: {search_url}")
         await page.goto(search_url, wait_until="domcontentloaded")
         logger.info(f"Landed on: {page.url}")
-        # await simulate_human_behavior(page)
         logger.info("Waiting for job list container...")
 
-        for sel in [".scaffold-layout__list", ".jobs-search-results"]:
+        # Use job list selectors from the TOML file
+        job_list_selectors = self.selectors.get("jobs", {}).get("job_list_selectors", [])
+        for sel in job_list_selectors:
             try:
                 await page.wait_for_selector(sel, timeout=30000)
                 logger.info(f"Job list found with selector => {sel}")
@@ -127,7 +135,7 @@ class LinkedInScraper:
 
     async def extract_job_infos(self, page: Any) -> List[Dict[str, Any]]:
         """
-        Extract minimal job info from job cards using multiple fallback selectors.
+        Extract minimal job info from job cards using selectors loaded externally.
 
         :param page: The Playwright page instance.
         :return: A list of dictionaries with basic job data.
@@ -135,14 +143,10 @@ class LinkedInScraper:
         results: List[Dict[str, Any]] = []
         logger.info("Extracting job cards from current page...")
 
-        known_selectors: List[str] = [
-            "li.scaffold-layout__list-item div.job-card-container",
-            "li.jobs-search-results__list-item div.job-card-container",
-            "div.job-card-list__container"
-        ]
-
+        # Use job card selectors from TOML
+        card_selectors = self.selectors.get("jobs", {}).get("job_card_selectors", [])
         job_cards: List[Any] = []
-        for sel in known_selectors:
+        for sel in card_selectors:
             try:
                 found = await page.query_selector_all(sel)
                 if found:
@@ -153,16 +157,27 @@ class LinkedInScraper:
                 logger.debug(f"Error finding job cards with {sel}: {ex}")
 
         if not job_cards:
-            logger.debug("No job cards found with known selectors.")
+            logger.debug("No job cards found with provided selectors.")
             return results
 
         blacklist: set = self.blacklist_data.get("blacklist", set())
         whitelist: set = self.blacklist_data.get("whitelist", set())
 
+        # Load card-level selectors for title, company, etc.
+        title_selectors = self.selectors.get("card", {}).get("title_selectors", [])
+        company_selectors = self.selectors.get("card", {}).get("company_selectors", [])
+        location_selectors = self.selectors.get("card", {}).get("location_selectors", [])
+        snippet_selectors = self.selectors.get("card", {}).get("snippet_selectors", [])
+        applicants_selectors = self.selectors.get("card", {}).get("applicants_selectors", [])
+        company_size_selectors = self.selectors.get("card", {}).get("company_size_selectors", [])
+
         for card in job_cards:
-            title_elem = await card.query_selector("a.job-card-list__title")
-            if not title_elem:
-                title_elem = await card.query_selector("div.full-width.artdeco-entity-lockup__title a span strong")
+            title_elem = None
+            # Try each title selector from TOML
+            for sel in title_selectors:
+                title_elem = await card.query_selector(sel)
+                if title_elem:
+                    break
             title = (await title_elem.text_content()).strip() if title_elem else ""
             logger.info(f"Extracted job title: '{title}'")
 
@@ -176,11 +191,53 @@ class LinkedInScraper:
                 logger.warning(f"Skipping job due to missing job ID: '{title}'")
                 continue
 
-            company = await self.extract_company_name(card)
-            loc = await self.extract_location(card)
-            descr = await self.extract_brief_description(card)
-            applicants_count = await self.extract_applicants_count(card)
-            csize = await self.extract_company_size_from_card(card)
+            # Extract company name using selectors
+            company = ""
+            for sel in company_selectors:
+                elem = await card.query_selector(sel)
+                if elem:
+                    company = (await elem.text_content()).strip()
+                    if company:
+                        break
+
+            # Extract location
+            loc = ""
+            for sel in location_selectors:
+                elem = await card.query_selector(sel)
+                if elem:
+                    loc = (await elem.text_content()).strip()
+                    if loc:
+                        break
+
+            # Extract brief description/snippet
+            descr = ""
+            for sel in snippet_selectors:
+                elem = await card.query_selector(sel)
+                if elem:
+                    descr = (await elem.text_content()).strip()
+                    if descr:
+                        break
+
+            # Extract applicants count
+            applicants_count = None
+            for sel in applicants_selectors:
+                elem = await card.query_selector(sel)
+                if elem:
+                    text = (await elem.text_content()) or ""
+                    match = re.search(r'(\d+)', text)
+                    if match:
+                        applicants_count = int(match.group(1))
+                        break
+
+            # Extract company size
+            csize = None
+            for sel in company_size_selectors:
+                elem = await card.query_selector(sel)
+                if elem:
+                    txt = await elem.text_content()
+                    if txt:
+                        csize = txt.strip()
+                        break
 
             job_info: Dict[str, Any] = {
                 "job_id": job_id,
@@ -209,103 +266,10 @@ class LinkedInScraper:
                 return val
         return None
 
-    async def extract_company_name(self, card: Any) -> str:
-        """
-        Extract the company name from a job card element using multiple selectors.
-
-        :param card: The job card element.
-        :return: The company name.
-        """
-        selectors: List[str] = [
-            "h4.job-card-container__company-name",
-            "span.job-card-container__company-name",
-            "div.job-card-list__company-name",
-            "h3.job-card-list__company-name"
-        ]
-        for sel in selectors:
-            elem = await card.query_selector(sel)
-            if elem:
-                text = (await elem.text_content()).strip()
-                if text:
-                    return text
-        return ""
-
-    async def extract_location(self, card: Any) -> str:
-        """
-        Extract the job location from a job card element.
-
-        :param card: The job card element.
-        :return: The location text.
-        """
-        selectors: List[str] = [
-            "li.job-card-container__metadata-item",
-            "span.job-card-container__metadata-item",
-            ".job-card-list__location"
-        ]
-        for sel in selectors:
-            elem = await card.query_selector(sel)
-            if elem:
-                text = (await elem.text_content()).strip()
-                if text:
-                    return text
-        return ""
-
-    async def extract_brief_description(self, card: Any) -> str:
-        """
-        Extract a brief job description from a job card.
-
-        :param card: The job card element.
-        :return: The description text.
-        """
-        snippet_selectors: List[str] = [
-            "p.job-card-list__snippet",
-            ".job-card-container__snippet"
-        ]
-        for sel in snippet_selectors:
-            elem = await card.query_selector(sel)
-            if elem:
-                text = (await elem.text_content()).strip()
-                if text:
-                    return text
-        return ""
-
-    async def extract_applicants_count(self, card: Any) -> Optional[int]:
-        """
-        Extract the number of applicants from a job card element.
-
-        :param card: The job card element.
-        :return: The applicants count as an integer, or None if not found.
-        """
-        elem = await card.query_selector("span.job-card-container__applicant-count")
-        if not elem:
-            return None
-        text = (await elem.text_content()) or ""
-        match = re.search(r'(\d+)', text)
-        return int(match.group(1)) if match else None
-
-    async def extract_company_size_from_card(self, card: Any) -> Optional[str]:
-        """
-        Extract the company size from a job card element.
-
-        :param card: The job card element.
-        :return: The company size string if found, otherwise None.
-        """
-        try:
-            csize = await card.get_attribute("data-company-size")
-            if csize:
-                return csize.strip()
-            size_elem = await card.query_selector("span.job-card-company-size")
-            if size_elem:
-                txt = await size_elem.text_content()
-                if txt:
-                    return txt.strip()
-        except Exception as e:
-            logger.debug(f"Company size from card error: {e}")
-        return None
-
     async def go_to_next_page(self, page: Any, current_page: int) -> bool:
         """
         Attempt to navigate to the next page of job listings by clicking on pagination buttons.
+        Selectors are loaded from the TOML file and formatted with the target page number.
 
         :param page: The Playwright page instance.
         :param current_page: The current page number.
@@ -314,29 +278,27 @@ class LinkedInScraper:
         next_num: int = current_page + 1
         logger.info(f"Attempting to go to next page => Page {next_num}")
 
-        selectors: List[str] = [
-            f"button[aria-label='Page {next_num}']",
-            f"a[aria-label='Page {next_num}']",
-            "button.artdeco-pagination__button--next",
-            "button[aria-label='Next']",
-            "a[aria-label='Next']"
-        ]
-
-        for sel in selectors:
+        pagination_selectors = self.selectors.get("pagination", {}).get("selectors", [])
+        for sel in pagination_selectors:
+            # Format the selector if it contains a placeholder
             try:
-                btn = await page.query_selector(sel)
+                formatted_sel = sel.format(page=next_num)
+            except Exception:
+                formatted_sel = sel
+            try:
+                btn = await page.query_selector(formatted_sel)
                 if btn:
                     disabled = (await btn.get_attribute("disabled")) or (await btn.get_attribute("aria-disabled"))
                     if disabled and disabled.lower() in ["true", "disabled"]:
-                        logger.info(f"Pagination button '{sel}' is disabled.")
+                        logger.info(f"Pagination button '{formatted_sel}' is disabled.")
                         continue
-                    logger.info(f"Clicking pagination => '{sel}'")
+                    logger.info(f"Clicking pagination => '{formatted_sel}'")
                     await btn.click()
                     await page.wait_for_load_state("domcontentloaded")
                     await asyncio.sleep(2)
                     return True
             except Exception as e:
-                logger.debug(f"Error clicking pagination '{sel}': {e}")
+                logger.debug(f"Error clicking pagination '{formatted_sel}': {e}")
 
         logger.info(f"No valid pagination found for page {next_num}, stopping.")
         return False
@@ -358,7 +320,7 @@ class LinkedInScraper:
 
     async def get_job_details(self, page: Any, job_id: str, search_card_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """
-        Load the full job detail page and extract additional information with multiple fallback selectors.
+        Load the full job detail page and extract additional information using selectors from the TOML file.
 
         :param page: The Playwright page instance.
         :param job_id: The job's unique identifier.
@@ -370,7 +332,7 @@ class LinkedInScraper:
 
         try:
             await page.goto(jurl, wait_until="domcontentloaded")
-            # await simulate_human_behavior(page)
+            # Optionally: await simulate_human_behavior(page)
         except PlaywrightTimeoutError:
             logger.error(f"Timeout loading detail => job {job_id}")
             return None
@@ -379,59 +341,36 @@ class LinkedInScraper:
             return None
 
         try:
+            # Load detail selectors from TOML
+            detail = self.selectors.get("detail", {})
+            title_selectors = detail.get("title_selectors", [])
+            company_selectors = detail.get("company_selectors", [])
+            location_selectors = detail.get("location_selectors", [])
+            description_selectors = detail.get("description_selectors", [])
+            posted_time_selectors = detail.get("posted_time_selectors", [])
+            company_url_selectors = detail.get("company_url_selectors", [])
+            company_size_selectors = detail.get("company_size_selectors", [])
+            applicants_detail_selectors = detail.get("applicants_detail_selectors", [])
+
             title: str = search_card_info.get("title", "") if search_card_info else ""
             company: str = search_card_info.get("company", "") if search_card_info else ""
             loc: str = search_card_info.get("location", "") if search_card_info else ""
             descr: str = search_card_info.get("description", "") if search_card_info else ""
 
             if not title:
-                title = await self.get_field_content(page, [
-                    "h1.jobs-unified-top-card__job-title",
-                    "h1.t-24.t-bold.inline",
-                    "div.job-details-jobs-unified-top-card__sticky-header-job-title strong",
-                    "h3.job-card-list__title"
-                ], default="")
+                title = await self.get_field_content(page, title_selectors, default="")
             if not company:
-                company = await self.get_field_content(page, [
-                    "a.jobs-unified-top-card__company-url",
-                    "div.job-details-jobs-unified-top-card__company-name a",
-                    "a[data-test-app-aware-link]"
-                ], default="")
+                company = await self.get_field_content(page, company_selectors, default="")
             if not loc:
-                loc = await self.get_field_content(page, [
-                    "span.jobs-unified-top-card__bullet",
-                    "div.job-details-jobs-unified-top-card__primary-description-container span.tvm__text--low-emphasis",
-                    "span.job-card-container__location"
-                ], default="")
+                loc = await self.get_field_content(page, location_selectors, default="")
             if not descr:
-                descr = await self.get_field_content(page, [
-                    "div.jobs-description-content__text",
-                    "section.description",
-                    "article.jobs-description__container",
-                    "div.jobs-box__html-content"
-                ], default="")
+                descr = await self.get_field_content(page, description_selectors, default="")
 
-            posted_t: str = await self.get_field_content(page, [
-                "span.posted-time-ago__text",
-                "time[datetime]",
-                "span.tvm__text--positive"
-            ], default="")
+            posted_t: str = await self.get_field_content(page, posted_time_selectors, default="")
             date_str: str = self.parse_posting_date(posted_t)
-
-            company_url: str = await self.get_field_content(page, [
-                "a.jobs-unified-top-card__company-url",
-                "div.job-details-jobs-unified-top-card__company-name a"
-            ], default="")
-
-            company_size: str = await self.get_field_content(page, [
-                "span.jobs-company__inline-information",
-                "div.org-top-card-summary-info-list__info-item"
-            ], default="Unknown")
-
-            applicants_text: str = await self.get_field_content(page, [
-                "span.jobs-unified-top-card__applicant-count",
-                "span.job-card-container__applicant-count"
-            ], default="Unknown")
+            company_url: str = await self.get_field_content(page, company_url_selectors, default="")
+            company_size: str = await self.get_field_content(page, company_size_selectors, default="Unknown")
+            applicants_text: str = await self.get_field_content(page, applicants_detail_selectors, default="Unknown")
             if applicants_text != "Unknown":
                 match = re.search(r'\d+', applicants_text)
                 applicants_count: Optional[int] = int(match.group(0)) if match else None
@@ -626,7 +565,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
     try:
         logger.info("Navigating to LinkedIn feed for final cleanup.")
         await page.goto("https://www.linkedin.com/feed/", wait_until='domcontentloaded')
-        # await simulate_human_behavior(page)
     except Exception:
         pass
 
@@ -724,7 +662,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
             )
             page = await context.new_page()
             await page.route("**/*", block_resources)
-            # await simulate_human_behavior(page)
 
             if args.manual_login:
                 logger.info("Manual login selected for debug mode. Log in & press Enter in console.")
