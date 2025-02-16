@@ -27,12 +27,16 @@ SESSION_STORE_DIR: str = 'session_store'
 if not os.path.exists(SESSION_STORE_DIR):
     os.makedirs(SESSION_STORE_DIR, exist_ok=True)
 
-config = load_config("jobfuq/conf/config.toml")
+# Load main config for scraping_mode
+main_config = load_config("jobfuq/conf/config.toml")
+scraping_mode = main_config.get("scraping", {}).get("mode", "normal").lower()
 
+# Load the linked-specific config (formerly linkedin_scraper_config.toml)
+linked_config = load_config("jobfuq/conf/linked_config.toml")
 
-###############################
-# Advanced Stealth Browser Setup
-###############################
+################################
+# Stealth Browser Setup
+################################
 async def create_stealth_browser(browser_type: BrowserType) -> Any:
     """
     Launch a browser with randomized stealth options.
@@ -58,7 +62,6 @@ async def create_stealth_browser(browser_type: BrowserType) -> Any:
         }
     )
 
-
 ###############################
 # Anti-Fingerprinting Enhancements
 ###############################
@@ -73,7 +76,8 @@ async def apply_stealth_scripts(page: Any) -> None:
     """
     # Prevent WebRTC leaks
     await page.add_init_script("() => { window.RTCPeerConnection = undefined; }")
-    # Canvas fingerprint spoofing: return null for non-'2d' contexts.
+
+    # Canvas fingerprint spoof
     await page.add_init_script("""
         () => {
             const getContext = HTMLCanvasElement.prototype.getContext;
@@ -87,7 +91,6 @@ async def apply_stealth_scripts(page: Any) -> None:
     """)
     # AudioContext masking
     await page.add_init_script("() => { window.AudioContext = undefined; }")
-
 
 ###############################
 # Resource Blocking
@@ -106,10 +109,9 @@ async def block_resources(route: Route, request: Request) -> None:
     else:
         await route.continue_()
 
-
-###############################
-# Enhanced Traffic Pattern Masking
-###############################
+################################
+# Optional Stealth Subroutines
+################################
 async def random_network_throttling(page: Any) -> None:
     """
     Simulate varied network conditions and random geolocation.
@@ -126,7 +128,6 @@ async def random_network_throttling(page: Any) -> None:
         'longitude': random.uniform(-180, 180)
     })
 
-
 async def fake_http_traffic(page: Any) -> None:
     """
     Simulate additional benign HTTP traffic.
@@ -140,7 +141,6 @@ async def fake_http_traffic(page: Any) -> None:
             await req_context.get("https://httpbin.org/get")
     except Exception as e:
         logger.debug(f"Fake HTTP traffic error: {e}")
-
 
 async def generate_realistic_mouse_physics(page: Any) -> None:
     """
@@ -165,7 +165,6 @@ async def generate_realistic_mouse_physics(page: Any) -> None:
             await page.mouse.move(current_x, current_y)
             await asyncio.sleep(random.uniform(0.001, 0.005))
 
-
 async def simulate_reading_patterns(page: Any) -> None:
     """
     Simulate slow scrolling to mimic a human reading a page.
@@ -177,10 +176,20 @@ async def simulate_reading_patterns(page: Any) -> None:
         await page.mouse.wheel(0, scroll_distance)
         await asyncio.sleep(random.uniform(1, 2))
 
+async def scroll_randomly(page: Any) -> None:
+    """
+    Randomly scroll the page to simulate human behavior.
 
-###############################
-# Combined Human Behavior Simulation
-###############################
+    :param page: The Playwright page instance.
+    """
+    for _ in range(random.randint(1, 5)):
+        scroll_distance = random.randint(-400, 400)
+        await page.mouse.wheel(0, scroll_distance)
+        await asyncio.sleep(random.uniform(0.3, 1.2))
+
+################################
+# Master Human Behavior
+################################
 async def simulate_human_behavior(page: Any) -> None:
     """
     Simulate a range of human-like interactions to evade bot detection.
@@ -207,10 +216,9 @@ async def simulate_human_behavior(page: Any) -> None:
         await page.mouse.move(x, y)
         await asyncio.sleep(random.uniform(0.1, 0.5))
 
-
-###############################
-# CAPTCHA Prevention
-###############################
+################################
+# CAPTCHA and Anti-Block
+################################
 async def handle_captcha(page: Any) -> None:
     """
     Detect and neutralize CAPTCHA challenges.
@@ -223,7 +231,7 @@ async def handle_captcha(page: Any) -> None:
         await page.evaluate("""
             () => {
                 document.querySelectorAll('iframe').forEach(iframe => {
-                    if(iframe.src.includes('captcha')) {
+                    if (iframe.src.includes('captcha')) {
                         iframe.style.display = 'none';
                     }
                 });
@@ -232,6 +240,34 @@ async def handle_captcha(page: Any) -> None:
         await page.wait_for_timeout(5000)
         await page.reload()
 
+async def detect_blocks(page: Any) -> bool:
+    """
+    Check for signs of automated blocking and trigger evasive actions if necessary.
+
+    :param page: The Playwright page instance.
+    :return: True if a block was detected and handled, otherwise False.
+    """
+    block_indicators = [
+        ('text=unusual activity detected', 0.9),
+        ('#error-for-alerts', 0.7),
+        ('text=security check', 0.8)
+    ]
+    for selector, confidence in block_indicators:
+        if await page.query_selector(selector):
+            await perform_evasive_action(page, confidence)
+            return True
+    return False
+
+async def perform_evasive_action(page: Any, confidence: float) -> None:
+    """
+    Perform evasive measures if blocking indicators are detected.
+
+    :param page: The Playwright page instance.
+    :param confidence: A value representing the likelihood of being blocked.
+    """
+    logger.info(f"Performing evasive action with confidence {confidence}")
+    await page.wait_for_timeout(5000)
+    await page.reload()
 
 ###############################
 # Session Rotation
@@ -254,140 +290,6 @@ async def rotate_session(context: Any) -> bool:
             return True
     return False
 
-
-###############################
-# Advanced Block Detection & Evasive Action
-###############################
-async def perform_evasive_action(page: Any, confidence: float) -> None:
-    """
-    Perform evasive measures if blocking indicators are detected.
-
-    :param page: The Playwright page instance.
-    :param confidence: A value representing the likelihood of being blocked.
-    """
-    logger.info(f"Performing evasive action with confidence {confidence}")
-    await page.wait_for_timeout(5000)
-    await page.reload()
-
-
-async def detect_blocks(page: Any) -> bool:
-    """
-    Check for signs of automated blocking and trigger evasive actions if necessary.
-
-    :param page: The Playwright page instance.
-    :return: True if a block was detected and handled, otherwise False.
-    """
-    block_indicators = [
-        ('text=unusual activity detected', 0.9),
-        ('#error-for-alerts', 0.7),
-        ('text=security check', 0.8)
-    ]
-    for selector, confidence in block_indicators:
-        if await page.query_selector(selector):
-            await perform_evasive_action(page, confidence)
-            return True
-    return False
-
-
-###############################
-# Traffic Light Monitoring
-###############################
-class TrafficLight:
-    """
-    Monitors page performance metrics as a traffic light system to adjust scraping behavior.
-    """
-    def __init__(self) -> None:
-        self.status: str = 'green'
-        self.request_count: int = 0
-
-    async def monitor(self, page: Any) -> None:
-        """
-        Periodically check page performance metrics and adjust the traffic light status.
-
-        :param page: The Playwright page instance.
-        """
-        self.request_count += 1
-        if self.request_count % 50 == 0:
-            performance_data = await page.evaluate("""
-                () => {
-                    const timing = performance.timing;
-                    return {
-                        dns: timing.domainLookupEnd - timing.domainLookupStart,
-                        tcp: timing.connectEnd - timing.connectStart,
-                        request: timing.responseStart - timing.requestStart,
-                        domComplete: timing.domComplete - timing.domLoading
-                    };
-                }
-            """)
-            logger.info(f"Performance data: {performance_data}")
-            if random.random() < 0.3:
-                self.status = 'yellow'
-                await page.wait_for_timeout(30000)
-            elif random.random() < 0.1:
-                self.status = 'red'
-                await page.context.close()
-
-
-def debug_log(message: str) -> None:
-    """
-    Log a debug message.
-
-    :param message: The message to log.
-    """
-    logger.debug(f"[DEBUG] {message}")
-
-
-async def scroll_randomly(page: Any) -> None:
-    """
-    Randomly scroll the page to simulate human behavior.
-
-    :param page: The Playwright page instance.
-    """
-    for _ in range(random.randint(1, 5)):
-        scroll_distance = random.randint(-400, 400)
-        await page.mouse.wheel(0, scroll_distance)
-        await asyncio.sleep(random.uniform(0.3, 1.2))
-
-
-async def type_like_human(page: Any, selector: str, text: str) -> None:
-    """
-    Simulate human-like typing for a given selector.
-
-    :param page: The Playwright page instance.
-    :param selector: The CSS selector of the input element.
-    :param text: The text to type.
-    """
-    for char in text:
-        await page.type(selector, char)
-        await asyncio.sleep(random.uniform(0.03, 0.25))
-        if random.random() < 0.1:
-            await asyncio.sleep(random.uniform(0.5, 2.0))
-
-
-async def move_mouse_and_click(page: Any, selector: str) -> None:
-    """
-    Simulate realistic mouse movements and click an element specified by the selector.
-
-    :param page: The Playwright page instance.
-    :param selector: The CSS selector of the target element.
-    """
-    element = await page.query_selector(selector)
-    if element:
-        box = await element.bounding_box()
-        if box:
-            for _ in range(random.randint(3, 8)):
-                x_offset = random.uniform(-20, 20)
-                y_offset = random.uniform(-20, 20)
-                await page.mouse.move(
-                    box['x'] + box['width'] / 2 + x_offset,
-                    box['y'] + box['height'] / 2 + y_offset,
-                    steps=random.randint(3, 10)
-                )
-                await asyncio.sleep(random.uniform(0.05, 0.2))
-            await page.mouse.click(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
-            await asyncio.sleep(random.uniform(0.2, 0.6))
-
-
 async def load_session(page: Any, username: str) -> bool:
     """
     Load a saved session for a given username from disk and apply it to the current page context.
@@ -401,15 +303,14 @@ async def load_session(page: Any, username: str) -> bool:
         storage = await load_storage(storage_file)
         if storage:
             await page.context.add_cookies(storage)
-            debug_log(f"Session loaded from file for account: {username}")
+            logger.debug(f"Session loaded from file for account: {username}")
             return True
         else:
-            debug_log(f"No valid session found for account: {username}")
+            logger.debug(f"No valid session found for account: {username}")
             return False
     except Exception as e:
-        debug_log(f"Failed to load session for account {username}: {e}")
+        logger.debug(f"Failed to load session for account {username}: {e}")
         return False
-
 
 async def load_storage(storage_file: str) -> List[Any]:
     """
@@ -422,13 +323,9 @@ async def load_storage(storage_file: str) -> List[Any]:
         with open(storage_file) as f:
             storage = json.load(f)
             return storage.get('cookies', [])
-    except FileNotFoundError:
-        debug_log(f"Session file {storage_file} not found.")
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.debug(f"Session file not found or invalid JSON: {storage_file}")
         return []
-    except json.JSONDecodeError:
-        debug_log(f"Invalid JSON in session file: {storage_file}")
-        return []
-
 
 async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
     """
@@ -442,15 +339,15 @@ async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
     :return: True if login is successful, otherwise False.
     """
     try:
-        await apply_stealth_scripts(page)
+        await apply_stealth_scripts(page)  # Always inject stealth scripts
         session_loaded = await load_session(page, username)
         if session_loaded:
             await page.goto('https://www.linkedin.com/feed/', wait_until='domcontentloaded', timeout=20000)
             if await wait_for_feed(page):
-                debug_log(f"Using saved session for account: {username}")
+                logger.debug(f"Using saved session for account: {username}")
                 return True
             else:
-                debug_log(f"Saved session for account {username} did not fully load feed. Proceeding with login.")
+                logger.debug(f"Saved session for account {username} did not fully load feed. Proceeding with login.")
         await page.goto('https://www.linkedin.com/login', wait_until='domcontentloaded')
         await simulate_human_behavior(page)
         username_input = await page.query_selector('input#username')
@@ -462,19 +359,20 @@ async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
             if password_input:
                 await type_like_human(page, 'input#password', password)
             else:
-                logger.error("Neither username nor password field found")
+                logger.error("Neither username nor password field found!")
                 return False
         await move_mouse_and_click(page, 'button[type="submit"]')
         if not await wait_for_feed(page):
             logger.error(f"Login failed for account {username}. Unexpected URL: {page.url}")
             return False
-        logger.debug(f"Successfully logged in with account: {username}")
-        await page.context.storage_state(path=os.path.join(SESSION_STORE_DIR, f'linkedin_session_{username}.json'))
+        logger.debug(f"Successfully logged in: {username}")
+        await page.context.storage_state(
+            path=os.path.join(SESSION_STORE_DIR, f'linkedin_session_{username}.json')
+        )
         return True
     except Exception as e:
         logger.error(f"Login failed for account {username}: {e}")
         return False
-
 
 def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> Any:
     """
@@ -501,6 +399,45 @@ def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> Any:
         return False
     return _wait()
 
+async def type_like_human(page: Any, selector: str, text: str) -> None:
+    """
+    Simulate human-like typing for a given selector.
+
+    :param page: The Playwright page instance.
+    :param selector: The CSS selector of the input element.
+    :param text: The text to type.
+    """
+    for char in text:
+        await page.type(selector, char)
+        await asyncio.sleep(random.uniform(0.03, 0.25))
+        if random.random() < 0.1:
+            await asyncio.sleep(random.uniform(0.5, 1.5))
+
+async def move_mouse_and_click(page: Any, selector: str) -> None:
+    """
+    Simulate realistic mouse movements and click an element specified by the selector.
+
+    :param page: The Playwright page instance.
+    :param selector: The CSS selector of the target element.
+    """
+    element = await page.query_selector(selector)
+    if element:
+        box = await element.bounding_box()
+        if box:
+            for _ in range(random.randint(3, 5)):
+                x_offset = random.uniform(-10, 10)
+                y_offset = random.uniform(-10, 10)
+                await page.mouse.move(
+                    box['x'] + box['width'] / 2 + x_offset,
+                    box['y'] + box['height'] / 2 + y_offset,
+                    steps=random.randint(3, 10)
+                )
+                await asyncio.sleep(random.uniform(0.05, 0.2))
+            await page.mouse.click(
+                box['x'] + box['width'] / 2,
+                box['y'] + box['height'] / 2
+            )
+            await asyncio.sleep(random.uniform(0.2, 0.6))
 
 def extract_emails_from_text(text: str) -> Optional[List[str]]:
     """
@@ -514,7 +451,6 @@ def extract_emails_from_text(text: str) -> Optional[List[str]]:
     email_regex = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
     return email_regex.findall(text)
 
-
 def refined_clean_text(text: str) -> str:
     """
     Clean up a text string by reducing whitespace.
@@ -523,7 +459,6 @@ def refined_clean_text(text: str) -> str:
     :return: A cleaned-up string with excess whitespace removed.
     """
     return re.sub(r'\s+', ' ', text).strip()
-
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def get_company_size(page: Any, url: str) -> str:
@@ -552,7 +487,6 @@ async def get_company_size(page: Any, url: str) -> str:
     except Exception as e:
         logger.error(f"Error scraping company size from {url}: {str(e)}")
         return "Unknown"
-
 
 def get_company_size_score(size_text: str) -> int:
     """

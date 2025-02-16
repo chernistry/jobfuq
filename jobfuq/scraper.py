@@ -53,7 +53,7 @@ class LinkedInScraper:
     def __init__(self, config: Dict[str, Any], time_filter: str, blacklist_data: Dict[str, Any]) -> None:
         """
         Initialize the scraper with general configuration, time filter, blacklist data,
-        and load all scraper configuration from 'jobfuq/conf/linkedin_scraper_config.toml'.
+        and load all scraper configuration from 'jobfuq/conf/linked_config.toml'.
 
         :param config: General configuration dictionary.
         :param time_filter: Time filter string (e.g., 'r604800').
@@ -64,8 +64,8 @@ class LinkedInScraper:
         self.blacklist_data: Dict[str, Any] = blacklist_data
         # Load all variable configuration from TOML
         try:
-            self.scraper_config: Dict[str, Any] = load_config("jobfuq/conf/linkedin_scraper_config.toml")
-            logger.info("Successfully loaded scraper configuration from linkedin_scraper_config.toml")
+            self.scraper_config: Dict[str, Any] = load_config("jobfuq/conf/linked_config.toml")
+            logger.info("Successfully loaded scraper configuration from linked_config.toml")
         except Exception as e:
             logger.error(f"Failed to load scraper configuration: {e}")
             self.scraper_config = {}
