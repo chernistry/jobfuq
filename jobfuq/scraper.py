@@ -33,6 +33,7 @@ from jobfuq.database import (
 from jobfuq.processor import process_and_rank_jobs
 from jobfuq.llm_handler import AIModel
 
+
 class LinkedInScraper:
     """
     LinkedInScraper handles searching for jobs, extracting basic job-card info,
@@ -71,7 +72,6 @@ class LinkedInScraper:
         self.scraping_mode = self.config.get("scraping", {}).get("mode", "normal").lower()
         if self.scraping_mode == "aggressive":
             logger.info("Aggressive mode active: reducing text timeout for fast extraction")
-            # Use a shorter timeout in aggressive mode so we don't wait 5 seconds per selector
             self.text_timeout = 1000  # 1 second timeout
 
         self.company_size_cache: Dict[str, str] = {}
@@ -152,32 +152,71 @@ class LinkedInScraper:
 
         return job_infos[:max_postings]
 
+    async def fetch_applicants_count(self, context_obj: Any) -> Optional[int]:
+        """
+        Extract the number of applicants using a robust fallback strategy.
+        Accepts either a card element or a full page.
+        """
+        au_conf = self.scraper_config.get("applicants_update", {})
+        selectors = au_conf.get("selectors", [])
+        xpaths = au_conf.get("xpaths", [])
+        patterns = au_conf.get("patterns", [])
+
+        # Try extracting using CSS selectors.
+        for sel in selectors:
+            try:
+                elem = await context_obj.query_selector(sel)
+                if elem:
+                    text = (await elem.text_content() or "").strip()
+                    for pattern in patterns:
+                        match = re.search(pattern, text, re.IGNORECASE)
+                        if match:
+                            return int(match.group(1))
+            except Exception:
+                continue
+
+        # Try extracting using XPath selectors.
+        for xpath in xpaths:
+            try:
+                elem = await context_obj.query_selector(f"xpath={xpath}")
+                if elem:
+                    text = (await elem.text_content() or "").strip()
+                    for pattern in patterns:
+                        match = re.search(pattern, text, re.IGNORECASE)
+                        if match:
+                            return int(match.group(1))
+            except Exception:
+                continue
+
+        # Fallback: scan full text of the context (card)
+        try:
+            full_text = (await context_obj.text_content() or "").strip()
+            for pattern in patterns:
+                match = re.search(pattern, full_text, re.IGNORECASE)
+                if match:
+                    return int(match.group(1))
+        except Exception:
+            pass
+
+        # Final fallback: use full page text.
+        try:
+            page = context_obj.page if hasattr(context_obj, "page") else context_obj
+            full_page_text = await page.evaluate("document.body.innerText")
+            for pattern in patterns:
+                match = re.search(pattern, full_page_text, re.IGNORECASE)
+                if match:
+                    return int(match.group(1))
+        except Exception:
+            pass
+
+        logger.warning("❌ No applicants count found.")
+        return None
+
     async def extract_applicants_count(self, card: Any) -> Optional[int]:
         """
-        Extract the applicants count from a job card element using dynamic selectors and regex patterns from config.
+        Delegates to fetch_applicants_count to extract applicants count from a card.
         """
-        selectors = self.scraper_config.get("applicants_update", {}).get("selectors", [])
-        patterns = self.scraper_config.get("applicants_update", {}).get("patterns", [])
-
-        # Try extracting using selectors
-        for sel in selectors:
-            elem = await card.query_selector(sel)
-            if elem:
-                text = (await elem.text_content()) or ""
-                for pattern in patterns:
-                    match = re.search(pattern, text, re.IGNORECASE)
-                    if match:
-                        return int(match.group(1))
-
-        # Fallback: search full card text if no match found
-        full_text = await card.text_content() or ""
-        for pattern in patterns:
-            match = re.search(pattern, full_text, re.IGNORECASE)
-            if match:
-                return int(match.group(1))
-
-        return None  # No match found
-
+        return await self.fetch_applicants_count(card)
 
     async def extract_job_infos(self, page: Any) -> List[Dict[str, Any]]:
         """
@@ -207,7 +246,7 @@ class LinkedInScraper:
         blacklist: set = self.blacklist_data.get("blacklist", set())
         whitelist: set = self.blacklist_data.get("whitelist", set())
 
-        # Load selectors
+        # Load selectors for card fields
         c = self.scraper_config.get("card", {})
         title_selectors = c.get("title_selectors", [])
         company_selectors = c.get("company_selectors", [])
@@ -216,7 +255,7 @@ class LinkedInScraper:
         company_size_selectors = c.get("company_size_selectors", [])
 
         for card in job_cards:
-            # Title
+            # Title extraction
             title_elem = None
             for sel in title_selectors:
                 title_elem = await card.query_selector(sel)
@@ -232,13 +271,13 @@ class LinkedInScraper:
                 logger.info(f"Skipped blacklisted title => '{title}'")
                 continue
 
-            # Job ID
+            # Job ID extraction
             job_id = await self.extract_job_id(card)
             if not job_id:
                 logger.warning(f"Skipping job due to missing job ID: '{title}'")
                 continue
 
-            # Company
+            # Company extraction
             company = ""
             for sel in company_selectors:
                 elem = await card.query_selector(sel)
@@ -247,7 +286,7 @@ class LinkedInScraper:
                     if company:
                         break
 
-            # Location
+            # Location extraction
             loc = ""
             for sel in location_selectors:
                 elem = await card.query_selector(sel)
@@ -256,7 +295,7 @@ class LinkedInScraper:
                     if loc:
                         break
 
-            # Snippet/description
+            # Snippet/description extraction
             descr = ""
             for sel in snippet_selectors:
                 elem = await card.query_selector(sel)
@@ -265,10 +304,10 @@ class LinkedInScraper:
                     if descr:
                         break
 
-            # Applicants
+            # Applicants extraction using enhanced method
             applicants_count = await self.extract_applicants_count(card)
 
-            # Company size
+            # Company size extraction
             csize = None
             for sel in company_size_selectors:
                 elem = await card.query_selector(sel)
@@ -375,7 +414,8 @@ class LinkedInScraper:
             posted_time_selectors = detail.get("posted_time_selectors", [])
             company_url_selectors = detail.get("company_url_selectors", [])
             company_size_selectors = detail.get("company_size_selectors", [])
-            applicants_detail_selectors = detail.get("applicants_detail_selectors", [])
+            # Note: Instead of using applicants_detail_selectors, we now always use the robust extraction.
+            # applicants_detail_selectors = detail.get("applicants_detail_selectors", [])
 
             # Fallback from card info if available
             title = search_card_info["title"] if search_card_info else ""
@@ -399,12 +439,8 @@ class LinkedInScraper:
             company_url = await self.get_field_content(page, company_url_selectors, default="")
             company_size = await self.get_field_content(page, company_size_selectors, default="Unknown")
 
-            applicants_text = await self.get_field_content(page, applicants_detail_selectors, default="Unknown")
-            if applicants_text != "Unknown":
-                match = re.search(r"\d+", applicants_text)
-                applicants_count: Optional[int] = int(match.group(0)) if match else None
-            else:
-                applicants_count = None
+            # Always use our robust applicants extraction for consistency with the debug script.
+            applicants_count = await self.fetch_applicants_count(page)
 
             remote_flag = any(
                 r in descr.lower()
@@ -483,43 +519,17 @@ class LinkedInScraper:
     async def update_existing_job(self, conn: Any, job_url: str, page: Any) -> Optional[Dict[str, Any]]:
         """
         Update job data (like applicants count) for an existing listing from the DB.
+        Uses the enhanced extraction approach.
         """
         try:
             logger.info(f"Updating existing job: {job_url}")
             await page.goto(job_url, wait_until=self.wait_until, timeout=30000)
             await simulate_human_behavior(page)
 
-            au_conf = self.scraper_config.get("applicants_update", {})
-            selectors = au_conf.get("selectors", [])
-            patterns = au_conf.get("patterns", [])
+            # Use the robust extraction method on the full page.
+            applicants_count: Optional[int] = await self.fetch_applicants_count(page)
 
-            applicants_count: Optional[int] = None
-            for s in selectors:
-                try:
-                    els = await page.query_selector_all(s)
-                    for e in els:
-                        txt = await e.inner_text()
-                        for p in patterns:
-                            m = re.search(p, txt, re.IGNORECASE)
-                            if m:
-                                applicants_count = int(m.group(1))
-                                break
-                        if applicants_count is not None:
-                            break
-                    if applicants_count is not None:
-                        break
-                except Exception:
-                    continue
-
-            # fallback
-            if applicants_count is None:
-                content = await page.content()
-                for p in patterns:
-                    m = re.search(p, content, re.IGNORECASE)
-                    if m:
-                        applicants_count = int(m.group(1))
-                        break
-
+            # Determine application status based on text.
             not_accept = await page.query_selector("text=No longer accepting applications")
             accepting = not not_accept
             current_time = int(time.time() * 1000)

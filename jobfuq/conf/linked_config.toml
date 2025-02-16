@@ -126,17 +126,25 @@ applicants_detail_selectors = [
 #      APPLICANTS UPDATE SETTINGS     #
 #######################################
 [applicants_update]
-# Selectors used to extract the applicants count dynamically
+
+# **CSS Selectors (for Playwright's `querySelector`)**
 selectors = [
     "span.jobs-unified-top-card__applicant-count",
     "span.job-card-container__applicant-count",
     ".jobs-details-top-card__applicant-count",
     "span.jobs-unified-top-card__subtitle-secondary-grouping",
     "span.tvm__text.tvm__text--low-emphasis",
-    "span.jobs-unified-top-card__subtitle-secondary-grouping"
+    "div.job-details-jobs-unified-top-card__primary-description-container span"
 ]
 
-# Patterns used to extract numbers from text
+# **XPath Selectors (for deeper elements)**
+xpaths = [
+#    "//span[normalize-space()='84 applicants']",
+    "(//span[contains(text(), 'applicant')])[1]",
+    "(//span[contains(., 'applicant')])[1]"
+]
+
+# **Regex Patterns for Text Matching**
 patterns = [
     "(\\d+)\\s*(?:applicant|candidate|people|person)s?\\b",
     "(\\d+)\\s*people clicked apply",
@@ -144,7 +152,6 @@ patterns = [
     "Be among the first (\\d+) applicants",
     "(\\d+)\\s*clicked apply"
 ]
-
 
 #######################################
 #        PAGINATION SETTINGS          #
