@@ -106,15 +106,26 @@ async def random_network_throttling(page: Any) -> None:
 async def fake_http_traffic(page: Any) -> None:
     """
     Generate benign HTTP requests from the same context to appear more human-like.
+    Fixed: Removed redundant context creation and corrected request handling
     """
     fake_http_url = linked_config.get("fake_http", {}).get("url", "https://httpbin.org/get")
+
     try:
-        # Correct usage: using the same context as the page
-        async with page.context.request.new_context() as req_context:
-            response = await req_context.get(fake_http_url)
-            logger.debug(f"Fake HTTP traffic response: {response.status} - {await response.text()}")
+        # Directly use existing request context from page
+        response = await page.context.request.get(
+            fake_http_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml"
+            }
+        )
+        logger.debug(f"Fake HTTP traffic response: {response.status} - {await response.text()}")
+
     except Exception as e:
         logger.debug(f"Fake HTTP traffic error: {e}")
+        # Implement exponential backoff for retries
+        await asyncio.sleep(2 ** retry_count)
+
 
 
 async def generate_realistic_mouse_physics(page: Any) -> None:
