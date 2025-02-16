@@ -20,11 +20,14 @@ from faker import Faker
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from jobfuq.logger import logger
+from jobfuq.utils import load_config
 
 # Directory to store session files
 SESSION_STORE_DIR: str = 'session_store'
 if not os.path.exists(SESSION_STORE_DIR):
     os.makedirs(SESSION_STORE_DIR, exist_ok=True)
+
+config = load_config("jobfuq/conf/config.toml")
 
 
 ###############################
@@ -323,20 +326,6 @@ class TrafficLight:
             elif random.random() < 0.1:
                 self.status = 'red'
                 await page.context.close()
-
-
-###############################
-# Utility Functions
-###############################
-def load_config(file_name: str) -> Dict[str, Any]:
-    """
-    Load configuration from a JSON file.
-
-    :param file_name: Path to the configuration file.
-    :return: Configuration dictionary.
-    """
-    with open(file_name) as f:
-        return json.load(f)
 
 
 def debug_log(message: str) -> None:

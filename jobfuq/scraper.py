@@ -26,9 +26,11 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 
 from jobfuq.logger import logger, set_verbose
 from jobfuq.linked_utils import (
-    load_config, ensure_logged_in, simulate_human_behavior,
+    ensure_logged_in, simulate_human_behavior,
     get_company_size, get_company_size_score, block_resources
 )
+from jobfuq.utils import load_config
+
 from jobfuq.database import (
     create_connection, create_table, create_blacklist_table, load_blacklist,
     insert_job, job_exists, is_company_blacklisted
@@ -692,7 +694,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
 
     :param args: The parsed command-line arguments.
     """
-    config = load_config("jobfuq/config.json")
+    config = load_config("jobfuq/conf/config.toml")
     if args.hours is not None:
         seconds = args.hours * 3600
         config["time_filter"] = f"r{seconds}"

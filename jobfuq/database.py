@@ -84,14 +84,14 @@ def create_connection(config: Dict[str, Any]) -> sqlite3.Connection:
     """
     Create and return a SQLite database connection.
 
-    The database path is taken from the configuration using the key 'job_listings.db'.
-    If not provided, it defaults to "data/job_listings.db". If the directory does not exist,
+    The database path is taken from the configuration using the key 'test_job_listings.db'.
+    If not provided, it defaults to "data/test_job_listings.db". If the directory does not exist,
     it will be created.
 
     :param config: A dictionary containing configuration values.
     :return: A SQLite database connection.
     """
-    db_path: str = config.get('job_listings.db', "data/job_listings.db")
+    db_path: str = config.get('db_path', "data/test_job_listings.db")
     db_dir: str = os.path.dirname(db_path)
     if not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)

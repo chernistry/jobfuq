@@ -24,6 +24,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 from rich.table import Table
 from rich.panel import Panel
 
+from .utils import load_config
 from .llm_handler import AIModel, evaluate_job, ProviderManager
 from .database import (
     create_connection, get_jobs_for_scoring, update_job_scores, add_fit_score_columns
@@ -32,21 +33,15 @@ from .logger import logger, set_verbose
 
 console = Console()
 
+config = load_config("jobfuq/conf/config.toml")
+
+
 # A global in-memory map tracking jobs that had extraction failures,
 # mapping job_id -> next_eligible_timestamp.
 # We skip these jobs until at least 3 minutes have passed.
 retry_map: Dict[int, float] = {}
 
 
-def load_config(config_path: str) -> Dict[str, Any]:
-    """
-    Load a JSON configuration file.
-
-    :param config_path: Path to the JSON config file.
-    :return: A dictionary containing configuration parameters.
-    """
-    with open(config_path, 'r') as f:
-        return json.load(f)
 
 
 def calculate_recency_score(job_date: str, max_days: int = 60) -> float:
