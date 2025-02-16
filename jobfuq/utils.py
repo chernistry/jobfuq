@@ -1,11 +1,12 @@
 # jobfuq/utils.py
 
 from typing import Any, Dict
+import sys
 
 try:
-    import tomllib  # Python 3.11+
+    import tomllib  # For Python 3.11+
 except ImportError:
-    import tomli as tomllib  # For Python versions < 3.11
+    import tomli as tomllib  # For Python < 3.11
 
 def load_config(config_path: str) -> Dict[str, Any]:
     """
