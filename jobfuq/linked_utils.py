@@ -4,6 +4,10 @@ Linked Utilities Module
 This module contains helper functions for the LinkedIn scraper, including advanced
 stealth techniques, human behavior simulation, CAPTCHA handling, session rotation,
 and various utility routines.
+
+All configurable parameters (selectors, timeouts, browser args, network profiles,
+resource blocking settings, URLs, etc.) are loaded from the TOML configuration file:
+    jobfuq/conf/linked_config.toml
 """
 
 import json
@@ -22,45 +26,72 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from jobfuq.logger import logger
 from jobfuq.utils import load_config
 
-# Directory to store session files
-SESSION_STORE_DIR: str = 'session_store'
-if not os.path.exists(SESSION_STORE_DIR):
-    os.makedirs(SESSION_STORE_DIR, exist_ok=True)
+# ---------------------------------------------------------------------------
+# SESSION STORAGE SETUP
+# ---------------------------------------------------------------------------
+# Directory to store session files; configurable here or in the config.
+SESSION_STORE_DIR: str = "session_store"  # default value
+linked_config_session_dir = SESSION_STORE_DIR
+# Allow override from config (if desired); otherwise, use the default.
+try:
+    # Load main config to optionally override session_store dir
+    main_config = load_config("jobfuq/conf/config.toml")
+    session_override = main_config.get("sessions", {}).get("store_dir")
+    if session_override:
+        SESSION_STORE_DIR = session_override
+except Exception as e:
+    logger.debug(f"Could not load session override from main config: {e}")
 
-# Load main config for scraping_mode
+os.makedirs(SESSION_STORE_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# LOAD CONFIGURATIONS
+# ---------------------------------------------------------------------------
+# Load main config for scraping_mode from the main config file.
 main_config = load_config("jobfuq/conf/config.toml")
 scraping_mode = main_config.get("scraping", {}).get("mode", "normal").lower()
 
-# Load the linked-specific config (formerly linkedin_scraper_config.toml)
+# Load the linked-specific config (contains selectors, browser args, etc.)
 linked_config = load_config("jobfuq/conf/linked_config.toml")
+
 
 ################################
 # Stealth Browser Setup
 ################################
 async def create_stealth_browser(browser_type: BrowserType) -> Any:
     """
-    Launch a browser with randomized stealth options.
+    Launch a browser with randomized stealth options using settings from config.
 
-    Uses Faker to generate a random user agent, random window size, and a random timezone
-    to help mask automated behavior.
+    Reads browser arguments and environment settings from the config.
 
     :param browser_type: The Playwright browser type to launch.
     :return: A launched browser instance.
     """
     fake = Faker()
+    # Retrieve browser argument settings from config
+    b_args = linked_config.get("browser_args", {})
+    width_min = b_args.get("window_width_min", 1000)
+    width_max = b_args.get("window_width_max", 1600)
+    height_min = b_args.get("window_height_min", 800)
+    height_max = b_args.get("window_height_max", 1200)
+    window_size = f"{random.randint(width_min, width_max)},{random.randint(height_min, height_max)}"
+
+    # Get environment settings from config
+    timezones = linked_config.get("env", {}).get("timezones", ["America/New_York"])
     return await browser_type.launch(
         headless=False,  # Use headed mode for more natural behavior.
         args=[
             f'--user-agent={fake.user_agent()}',
-            '--disable-blink-features=AutomationControlled',
+            f'--disable-blink-features={b_args.get("disable_blink_features", "AutomationControlled")}',
             '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            f'--window-size={random.randint(1000,1600)},{random.randint(800,1200)}'
+            f'--disable-features={b_args.get("disable_features", "IsolateOrigins,site-per-process")}',
+            f'--window-size={window_size}'
         ],
         env={
-            'TZ': random.choice(['America/New_York', 'Europe/Paris', 'Asia/Singapore'])
+            'TZ': random.choice(timezones)
         }
     )
+
 
 ###############################
 # Anti-Fingerprinting Enhancements
@@ -69,15 +100,14 @@ async def apply_stealth_scripts(page: Any) -> None:
     """
     Inject scripts to mask browser fingerprinting.
 
-    Prevents WebRTC leaks, spoofs canvas fingerprinting (only allowing 2d contexts),
+    Prevents WebRTC leaks, spoofs canvas fingerprinting (allowing only '2d' contexts),
     and disables the AudioContext.
 
     :param page: The Playwright page instance.
     """
     # Prevent WebRTC leaks
     await page.add_init_script("() => { window.RTCPeerConnection = undefined; }")
-
-    # Canvas fingerprint spoof
+    # Canvas fingerprint spoofing: only allow '2d' contexts.
     await page.add_init_script("""
         () => {
             const getContext = HTMLCanvasElement.prototype.getContext;
@@ -92,6 +122,7 @@ async def apply_stealth_scripts(page: Any) -> None:
     # AudioContext masking
     await page.add_init_script("() => { window.AudioContext = undefined; }")
 
+
 ###############################
 # Resource Blocking
 ###############################
@@ -99,15 +130,17 @@ async def block_resources(route: Route, request: Request) -> None:
     """
     Blocks specific resource types from loading to improve scraping performance.
 
-    Blocks images, fonts, and media requests. Other resource types are allowed to load.
+    Reads the list of resource types to block from config.
 
     :param route: The Playwright route object.
     :param request: The Playwright request object.
     """
-    if request.resource_type in ["image", "font", "media"]:
+    block_types = linked_config.get("resource_blocking", {}).get("types", ["image", "font", "media"])
+    if request.resource_type in block_types:
         await route.abort()
     else:
         await route.continue_()
+
 
 ################################
 # Optional Stealth Subroutines
@@ -116,13 +149,13 @@ async def random_network_throttling(page: Any) -> None:
     """
     Simulate varied network conditions and random geolocation.
 
-    Although Playwright doesn't natively support network condition emulation,
-    this function sets a random geolocation and logs a random network profile.
+    Uses network profiles from config.
 
     :param page: The Playwright page instance.
     """
-    profiles = ['Wi-Fi', 'Regular4G', 'DSL']
-    logger.debug(f"Applying random network profile: {random.choice(profiles)}")
+    profiles = linked_config.get("network_profiles", {}).get("profiles", ["Wi-Fi", "Regular4G", "DSL"])
+    chosen = random.choice(profiles)
+    logger.debug(f"Applying random network profile: {chosen}")
     await page.context.set_geolocation({
         'latitude': random.uniform(-90, 90),
         'longitude': random.uniform(-180, 180)
@@ -132,32 +165,39 @@ async def fake_http_traffic(page: Any) -> None:
     """
     Simulate additional benign HTTP traffic.
 
-    Performs a harmless GET request to mimic normal background activity.
+    Uses the URL specified in config.
 
     :param page: The Playwright page instance.
     """
+    fake_http_url = linked_config.get("fake_http", {}).get("url", "https://httpbin.org/get")
     try:
         async with page.context.request.new_context() as req_context:
-            await req_context.get("https://httpbin.org/get")
+            await req_context.get(fake_http_url)
     except Exception as e:
         logger.debug(f"Fake HTTP traffic error: {e}")
 
 async def generate_realistic_mouse_physics(page: Any) -> None:
     """
-    Simulate physics-based mouse movements.
-
-    Generates realistic mouse trajectories between random start and end points.
+    Simulate physics-based mouse movements using configurable parameters.
 
     :param page: The Playwright page instance.
     """
+    physics = linked_config.get("mouse_physics", {})
+    steps_min = physics.get("steps_min", 120)
+    steps_max = physics.get("steps_max", 250)
+    gravity_min = physics.get("gravity_min", 0.5)
+    gravity_max = physics.get("gravity_max", 1.5)
+    wind_min = physics.get("wind_min", -0.5)
+    wind_max = physics.get("wind_max", 0.5)
+
     for _ in range(random.randint(3, 7)):
         start_x = random.randint(0, 1200)
         start_y = random.randint(0, 800)
         end_x = random.randint(0, 1200)
         end_y = random.randint(0, 800)
-        steps = random.randint(120, 250)
-        gravity = random.uniform(0.5, 1.5)
-        wind = random.uniform(-0.5, 0.5)
+        steps = random.randint(steps_min, steps_max)
+        gravity = random.uniform(gravity_min, gravity_max)
+        wind = random.uniform(wind_min, wind_max)
         for i in range(steps):
             t = i / steps
             current_x = start_x + (end_x - start_x) * t
@@ -187,20 +227,22 @@ async def scroll_randomly(page: Any) -> None:
         await page.mouse.wheel(0, scroll_distance)
         await asyncio.sleep(random.uniform(0.3, 1.2))
 
+
 ################################
-# Master Human Behavior
+# Master Human Behavior Simulation
 ################################
 async def simulate_human_behavior(page: Any) -> None:
     """
     Simulate a range of human-like interactions to evade bot detection.
 
-    Combines scrolling, dynamic viewport resizing, network throttling,
-    fake HTTP traffic, realistic mouse physics, reading patterns, and additional mouse movements.
+    Combines scrolling, viewport resizing, network throttling, fake HTTP traffic,
+    realistic mouse physics, and reading patterns.
 
     :param page: The Playwright page instance.
     """
     await scroll_randomly(page)
     await asyncio.sleep(random.uniform(1, 3))
+    # Randomly resize viewport based on config values or use defaults.
     if random.random() < 0.3:
         width = random.randint(800, 1600)
         height = random.randint(600, 1000)
@@ -216,8 +258,9 @@ async def simulate_human_behavior(page: Any) -> None:
         await page.mouse.move(x, y)
         await asyncio.sleep(random.uniform(0.1, 0.5))
 
+
 ################################
-# CAPTCHA and Anti-Block
+# CAPTCHA and Anti-Block Handling
 ################################
 async def handle_captcha(page: Any) -> None:
     """
@@ -227,7 +270,8 @@ async def handle_captcha(page: Any) -> None:
 
     :param page: The Playwright page instance.
     """
-    if await page.query_selector('#captcha-challenge'):
+    captcha_selector = linked_config.get("captcha", {}).get("selector", "#captcha-challenge")
+    if await page.query_selector(captcha_selector):
         await page.evaluate("""
             () => {
                 document.querySelectorAll('iframe').forEach(iframe => {
@@ -237,7 +281,8 @@ async def handle_captcha(page: Any) -> None:
                 });
             }
         """)
-        await page.wait_for_timeout(5000)
+        timeout_val = linked_config.get("captcha", {}).get("timeout_ms", 5000)
+        await page.wait_for_timeout(timeout_val)
         await page.reload()
 
 async def detect_blocks(page: Any) -> bool:
@@ -247,11 +292,11 @@ async def detect_blocks(page: Any) -> bool:
     :param page: The Playwright page instance.
     :return: True if a block was detected and handled, otherwise False.
     """
-    block_indicators = [
+    block_indicators = linked_config.get("block_indicators", {}).get("selectors", [
         ('text=unusual activity detected', 0.9),
         ('#error-for-alerts', 0.7),
         ('text=security check', 0.8)
-    ]
+    ])
     for selector, confidence in block_indicators:
         if await page.query_selector(selector):
             await perform_evasive_action(page, confidence)
@@ -263,15 +308,17 @@ async def perform_evasive_action(page: Any, confidence: float) -> None:
     Perform evasive measures if blocking indicators are detected.
 
     :param page: The Playwright page instance.
-    :param confidence: A value representing the likelihood of being blocked.
+    :param confidence: Likelihood of being blocked.
     """
     logger.info(f"Performing evasive action with confidence {confidence}")
-    await page.wait_for_timeout(5000)
+    evasive_timeout = linked_config.get("evasive", {}).get("timeout_ms", 5000)
+    await page.wait_for_timeout(evasive_timeout)
     await page.reload()
 
-###############################
-# Session Rotation
-###############################
+
+################################
+# Session Rotation & Storage
+################################
 async def rotate_session(context: Any) -> bool:
     """
     Randomly rotate session cookies from stored session files.
@@ -298,18 +345,14 @@ async def load_session(page: Any, username: str) -> bool:
     :param username: The username whose session to load.
     :return: True if the session was loaded successfully, otherwise False.
     """
-    try:
-        storage_file = os.path.join(SESSION_STORE_DIR, f'linkedin_session_{username}.json')
-        storage = await load_storage(storage_file)
-        if storage:
-            await page.context.add_cookies(storage)
-            logger.debug(f"Session loaded from file for account: {username}")
-            return True
-        else:
-            logger.debug(f"No valid session found for account: {username}")
-            return False
-    except Exception as e:
-        logger.debug(f"Failed to load session for account {username}: {e}")
+    storage_file = os.path.join(SESSION_STORE_DIR, f'linkedin_session_{username}.json')
+    storage = await load_storage(storage_file)
+    if storage:
+        await page.context.add_cookies(storage)
+        logger.debug(f"Session loaded from file for account: {username}")
+        return True
+    else:
+        logger.debug(f"No valid session found for account: {username}")
         return False
 
 async def load_storage(storage_file: str) -> List[Any]:
@@ -339,17 +382,23 @@ async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
     :return: True if login is successful, otherwise False.
     """
     try:
-        await apply_stealth_scripts(page)  # Always inject stealth scripts
+        # Always inject stealth scripts before login attempt.
+        await apply_stealth_scripts(page)
         session_loaded = await load_session(page, username)
+        # Use URLs from config for feed and login.
+        feed_url = linked_config.get("urls", {}).get("feed_url", "https://www.linkedin.com/feed/")
+        login_url = linked_config.get("urls", {}).get("login_url", "https://www.linkedin.com/login")
+        wait_until = linked_config.get("urls", {}).get("wait_until", "domcontentloaded")
         if session_loaded:
-            await page.goto('https://www.linkedin.com/feed/', wait_until='domcontentloaded', timeout=20000)
+            await page.goto(feed_url, wait_until=wait_until, timeout=20000)
             if await wait_for_feed(page):
                 logger.debug(f"Using saved session for account: {username}")
                 return True
             else:
                 logger.debug(f"Saved session for account {username} did not fully load feed. Proceeding with login.")
-        await page.goto('https://www.linkedin.com/login', wait_until='domcontentloaded')
+        await page.goto(login_url, wait_until=wait_until)
         await simulate_human_behavior(page)
+        # Attempt to type credentials into fields.
         username_input = await page.query_selector('input#username')
         if username_input:
             await type_like_human(page, 'input#username', username)
@@ -361,14 +410,15 @@ async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
             else:
                 logger.error("Neither username nor password field found!")
                 return False
+        # Click the submit button.
         await move_mouse_and_click(page, 'button[type="submit"]')
         if not await wait_for_feed(page):
             logger.error(f"Login failed for account {username}. Unexpected URL: {page.url}")
             return False
         logger.debug(f"Successfully logged in: {username}")
-        await page.context.storage_state(
-            path=os.path.join(SESSION_STORE_DIR, f'linkedin_session_{username}.json')
-        )
+        # Save session state for future use.
+        session_path = os.path.join(SESSION_STORE_DIR, f'linkedin_session_{username}.json')
+        await page.context.storage_state(path=session_path)
         return True
     except Exception as e:
         logger.error(f"Login failed for account {username}: {e}")
@@ -378,6 +428,8 @@ def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> Any:
     """
     Return an asynchronous function that waits for the LinkedIn feed to load.
 
+    Uses URLs from config to determine if the feed has loaded.
+
     :param page: The Playwright page instance.
     :param timeout: Maximum wait time in milliseconds.
     :param interval: Polling interval in milliseconds.
@@ -385,11 +437,13 @@ def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> Any:
     """
     async def _wait() -> bool:
         waited = 0
+        feed_indicator = linked_config.get("urls", {}).get("feed_url_indicator", "linkedin.com/feed")
+        ssr_login_indicator = linked_config.get("urls", {}).get("ssr_login_indicator", "linkedin.com/ssr-login")
         while waited < timeout:
             current_url = page.url
-            if "linkedin.com/feed" in current_url:
+            if feed_indicator in current_url:
                 return True
-            if "linkedin.com/ssr-login" in current_url:
+            if ssr_login_indicator in current_url:
                 logger.info("Detected ssr-login page, waiting for 5 seconds...")
                 await asyncio.sleep(5)
                 waited += 5000
@@ -470,14 +524,14 @@ async def get_company_size(page: Any, url: str) -> str:
     :return: The company size as a string, or "Unknown" if not found.
     """
     try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await page.goto(url, wait_until=linked_config.get("urls", {}).get("wait_until", "domcontentloaded"), timeout=30000)
         await simulate_human_behavior(page)
-        not_found_selector = 'h1:has-text("Page not found")'
+        not_found_selector = linked_config.get("company", {}).get("not_found_selector", 'h1:has-text("Page not found")')
         if await page.query_selector(not_found_selector):
             logger.warning(f"Company page not found: {url}")
             return "Unknown"
-        await page.wait_for_selector('.org-top-card-summary-info-list__info-item', timeout=20000)
-        employee_count_element = await page.query_selector('.org-top-card-summary-info-list__info-item:has-text("employee")')
+        await page.wait_for_selector(linked_config.get("company", {}).get("employee_selector", ".org-top-card-summary-info-list__info-item"), timeout=20000)
+        employee_count_element = await page.query_selector(linked_config.get("company", {}).get("employee_selector", '.org-top-card-summary-info-list__info-item:has-text("employee")'))
         if employee_count_element:
             size_text = await employee_count_element.inner_text()
             return size_text.replace("employees", "").strip()
@@ -490,7 +544,7 @@ async def get_company_size(page: Any, url: str) -> str:
 
 def get_company_size_score(size_text: str) -> int:
     """
-    Convert a company size text to a numeric score.
+    Convert a company size text to a numeric score using the size map from config.
 
     :param size_text: Company size string.
     :return: An integer score representing the company size.
@@ -498,11 +552,7 @@ def get_company_size_score(size_text: str) -> int:
     size_text = size_text.lower().strip()
     if "unknown" in size_text:
         return 0
-    size_map = {
-        "1-10": 1, "2-10": 1, "11-50": 2, "51-200": 3, "201-500": 4,
-        "501-1k": 5, "501-1,000": 5, "1k-5k": 6, "1,001-5,000": 6,
-        "5k-10k": 7, "5,001-10,000": 7, "10k+": 8, "10,001+": 8
-    }
+    size_map = linked_config.get("size_map", {})
     for key, score in size_map.items():
         if key in size_text:
             return score
