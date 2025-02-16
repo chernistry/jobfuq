@@ -21,9 +21,9 @@ retry_delay = 180  # 3 minutes
 #         DATABASE CONFIGURATION      #
 #######################################
 
-# Database path for storing DevOps job listings
+# Database path for storing job listings
 # Use a dummy or default path for now
-db_path = "data/test_job_listings.db"
+db_path = "data/job_listings.db"
 
 # Path to store blacklisted companies/jobs
 # This file should store blacklisted entries in a json format
@@ -51,28 +51,28 @@ user_agents = [
 
 # List of search queries for job scraping
 [[search_queries]]
-keywords = "DevOps engineer"
-location = "Israel"
+keywords = "Example job title 1"
+location = "Dummy Location 1"
 f_WT = "1"  # 1 = On-Site, 2 = Remote, 3 = Hybrid
 
 [[search_queries]]
-keywords = "LLM engineer"
-location = "Israel"
+keywords = "Example job title 2"
+location = "Dummy Location 2"
 f_WT = "1"
 
 [[search_queries]]
-keywords = "Prompt engineer"
-location = "Israel"
+keywords = "Example job title 3"
+location = "Dummy Location 3"
 f_WT = "1"
 
 [[search_queries]]
-keywords = "Junior DevOps engineer"
-location = "Israel"
+keywords = "Example job title 4"
+location = "Dummy Location 4"
 f_WT = "1"
 
 [[search_queries]]
-keywords = "Infrastructure Engineer"
-location = "Israel"
+keywords = "Example job title 5"
+location = "Dummy Location 5"
 f_WT = "1"
 
 #######################################

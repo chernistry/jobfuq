@@ -783,7 +783,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
     config["manual_login"] = args.manual_login
     squeries = config.get(
         "search_queries",
-        [{"keywords": "DevOps Engineer", "location": "Israel", "remote": None}]
+        [{"keywords": "Master of Internet Surfing", "location": "Netherlands", "remote": None}]
     )
 
     async with async_playwright() as p:
