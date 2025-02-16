@@ -415,7 +415,6 @@ class LinkedInScraper:
             company_url_selectors = detail.get("company_url_selectors", [])
             company_size_selectors = detail.get("company_size_selectors", [])
             # Note: Instead of using applicants_detail_selectors, we now always use the robust extraction.
-            # applicants_detail_selectors = detail.get("applicants_detail_selectors", [])
 
             # Fallback from card info if available
             title = search_card_info["title"] if search_card_info else ""
@@ -662,6 +661,8 @@ async def get_jobcards(
             logger.info(f"Scraping => kw={kw}, loc={loc}, remote={remote}")
             job_infos = await scraper.search_jobs(page, kw, loc, remote)
 
+            # List to hold concurrent detail tasks
+            tasks = []
             for info in job_infos:
                 job_url = f"{scraper.base_url}/jobs/view/{info['job_id']}/"
                 if job_exists(conn, job_url):
@@ -683,8 +684,9 @@ async def get_jobcards(
                         logger.debug(f"Job {job_url} exists and was recently checked; skipping update.")
                     continue
 
-                async with semaphore:
-                    detail = await fetch_job_detail_task(
+                # Create a task for fetching job details (the semaphore is used inside the task)
+                tasks.append(asyncio.create_task(
+                    fetch_job_detail_task(
                         scraper,
                         info,
                         conn,
@@ -692,7 +694,11 @@ async def get_jobcards(
                         blacklist,
                         semaphore
                     )
-                    if detail:
+                ))
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for detail in results:
+                    if isinstance(detail, dict) and detail:
                         yield detail
 
     try:
@@ -781,7 +787,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
     )
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, slow_mo=50)
+        browser = await p.chromium.launch(headless=True, slow_mo=50)
 
         if args.debug_single:
             logger.info("Debug mode enabled: Possibly scraping a single job link or one job from search.")

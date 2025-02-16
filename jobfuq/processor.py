@@ -353,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "config",
         nargs="?",
-        default="jobfuq/config.json",
+        default="jobfuq/conf/config.toml",
         help="Path to config file"
     )
     parser.add_argument(
