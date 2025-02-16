@@ -28,11 +28,16 @@ class OpenRouterModel:
         :param config: A configuration dictionary containing API keys and model information.
         :param system_message: The system message to include in every prompt.
         """
-        self.api_key: str = config.get("openrouter_api_key")
-        self.model: str = config.get("openrouter_model", "deepseek/deepseek-r1:free")
+        # Read OpenRouter settings from the nested ai_providers config.
+        ai_config = config.get("ai_providers", {})
+        api_keys = ai_config.get("openrouter_api_keys", [])
+        if not api_keys:
+            raise ValueError("No OpenRouter API key provided in ai_providers.openrouter_api_keys.")
+        self.api_key: str = api_keys[0]
+        self.model: str = ai_config.get("openrouter_model", "deepseek/deepseek-r1:free")
         self.system_message: str = system_message
         # Use free limits if the model ID ends with ':free'; otherwise, use provided config.
-        self.rpm_limit: int = 20 if self.model.endswith(":free") else config.get("openrouter_rpm", 55)
+        self.rpm_limit: int = 20 if self.model.endswith(":free") else ai_config.get("openrouter_rpm", 55)
         self._requests: list = []
         self.window: int = 60  # seconds
 
@@ -67,7 +72,9 @@ class OpenRouterModel:
         while self._requests and current_time - self._requests[0] > self.window:
             self._requests.pop(0)
         if len(self._requests) >= self.rpm_limit:
-            await asyncio.sleep(self.window - (current_time - self._requests[0]))
+            sleep_time = self.window - (current_time - self._requests[0])
+            logger.debug(f"OpenRouter rate limiter sleeping for {sleep_time:.2f} seconds.")
+            await asyncio.sleep(sleep_time)
         self._requests.append(time.time())
 
     async def evaluate(self, prompt: str, max_tokens: int = 10000) -> str:

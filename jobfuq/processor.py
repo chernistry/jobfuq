@@ -214,8 +214,8 @@ async def process_and_rank_jobs(
             keys.append(together_key)
     else:
         keys = []
-
-    logger.debug(f"API keys found: {keys}")
+    #
+    # logger.debug(f"API keys found: {keys}")
     if not keys:
         logger.error(f"No API keys found for provider mode '{provider_mode}'. Exiting.")
         sys.exit(1)
