@@ -126,15 +126,17 @@ applicants_detail_selectors = [
 #      APPLICANTS UPDATE SETTINGS     #
 #######################################
 [applicants_update]
-
+# Selectors used to extract the applicants count dynamically
 selectors = [
+    "span.jobs-unified-top-card__applicant-count",
+    "span.job-card-container__applicant-count",
     ".jobs-details-top-card__applicant-count",
-    ".jobs-unified-top-card__applicant-count",
-    "span.jobs-unified-top-card__subtitle-secondary-grouping span:has-text(\"applicant\")",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping",
     "span.tvm__text.tvm__text--low-emphasis",
     "span.jobs-unified-top-card__subtitle-secondary-grouping"
 ]
 
+# Patterns used to extract numbers from text
 patterns = [
     "(\\d+)\\s*(?:applicant|candidate|people|person)s?\\b",
     "(\\d+)\\s*people clicked apply",

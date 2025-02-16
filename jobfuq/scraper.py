@@ -154,17 +154,30 @@ class LinkedInScraper:
 
     async def extract_applicants_count(self, card: Any) -> Optional[int]:
         """
-        Extract the applicants count from a job card element.
+        Extract the applicants count from a job card element using dynamic selectors and regex patterns from config.
         """
-        selectors = self.scraper_config.get("card", {}).get("applicants_selectors", [])
+        selectors = self.scraper_config.get("applicants_update", {}).get("selectors", [])
+        patterns = self.scraper_config.get("applicants_update", {}).get("patterns", [])
+
+        # Try extracting using selectors
         for sel in selectors:
             elem = await card.query_selector(sel)
             if elem:
                 text = (await elem.text_content()) or ""
-                match = re.search(r"(\d+)", text)
-                if match:
-                    return int(match.group(1))
-        return None
+                for pattern in patterns:
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        return int(match.group(1))
+
+        # Fallback: search full card text if no match found
+        full_text = await card.text_content() or ""
+        for pattern in patterns:
+            match = re.search(pattern, full_text, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+
+        return None  # No match found
+
 
     async def extract_job_infos(self, page: Any) -> List[Dict[str, Any]]:
         """
