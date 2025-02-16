@@ -11,16 +11,13 @@ This module defines the main job ranking pipeline, orchestrating:
 
 import asyncio
 import argparse
-import json
 import math
-import os
 import sys
 import time
 from datetime import datetime
 from typing import List, Dict, Any
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.panel import Panel
 
@@ -33,25 +30,14 @@ from .logger import logger, set_verbose
 
 console = Console()
 
+# Load configuration
 config = load_config("jobfuq/conf/config.toml")
 
-
-# A global in-memory map tracking jobs that had extraction failures,
-# mapping job_id -> next_eligible_timestamp.
-# We skip these jobs until at least 3 minutes have passed.
+# Global in-memory map tracking jobs with extraction failures (job_id -> next eligible timestamp)
 retry_map: Dict[int, float] = {}
 
 
-
-
 def calculate_recency_score(job_date: str, max_days: int = 60) -> float:
-    """
-    Compute how recent the job was posted. Older postings get lower scores.
-
-    :param job_date: A string in YYYY-MM-DD format representing the posting date.
-    :param max_days: The maximum days beyond which a job is considered stale (score=0).
-    :return: A recency factor between 0.0 (stale) and ~1.0 (very recent).
-    """
     try:
         days_diff = (datetime.now() - datetime.strptime(job_date, '%Y-%m-%d')).days
         if days_diff > max_days:
@@ -63,12 +49,6 @@ def calculate_recency_score(job_date: str, max_days: int = 60) -> float:
 
 
 def calculate_company_size_score(size_score: int) -> float:
-    """
-    Convert an integer-based company size rating into a 0.0–1.0 score.
-
-    :param size_score: The integer rating indicating company size.
-    :return: A score between 0.0 and 1.0 reflecting preference for mid-range sizes.
-    """
     try:
         if 3 <= size_score <= 5:
             return 1.0
@@ -84,12 +64,6 @@ def calculate_company_size_score(size_score: int) -> float:
 
 
 def softened_competition_penalty(applicant_count: int) -> float:
-    """
-    Penalize jobs with many applicants. The penalty is softened (log-based) to avoid extreme drops.
-
-    :param applicant_count: Number of applicants or “viewed” count from LinkedIn.
-    :return: A multiplier typically between 0.7 and 1.0 depending on applicant volume.
-    """
     base = 1.0 / (math.log(applicant_count + 3) + 1)
     return 0.7 + 0.3 * base
 
@@ -100,15 +74,6 @@ def calculate_final_score(
         applicant_count: int,
         company_size_score: float
 ) -> float:
-    """
-    Compute a final job rank score from 0.0 to 1.0, aggregating multiple factors.
-
-    :param evaluation: Dictionary of AI-extracted fields (skills_match, etc.).
-    :param recency_score: A factor indicating how recent the job posting is.
-    :param applicant_count: Number of applicants for the job.
-    :param company_size_score: The size-based score for the company.
-    :return: A final job fit/rank score in [0.01, 1.0].
-    """
     skills_match = evaluation.get('skills_match', 0.0)
     resume_similarity = evaluation.get('resume_similarity', 0.0)
     success_probability = evaluation.get('success_probability', 0.8)
@@ -116,36 +81,27 @@ def calculate_final_score(
     effort_days_to_fit = evaluation.get('effort_days_to_fit', 4.0)
     critical_penalty = max(evaluation.get('critical_skill_mismatch_penalty', 0.0), 0.0)
 
-    # 1) Base fit
     initial_fit = (skills_match * 0.6) + (resume_similarity * 0.4)
-
-    # 2) Multiply by success_probability & confidence
     base = initial_fit * success_probability * confidence
 
-    # 3) Scale penalty if success_probability is high
     penalty_factor = 0.2 * (1.0 - 0.5 * success_probability)
     if penalty_factor < 0.05:
         penalty_factor = 0.05
     base -= (critical_penalty * penalty_factor)
 
-    # 4) Slight multiplier for fewer days needed
     upskill_mult = max(0.90, 1.0 - math.log(effort_days_to_fit + 1) * 0.03)
     base *= upskill_mult
 
-    # 5) Additional confidence adjustment
     conf_adjust = 1.0 - ((1.0 - confidence) ** 2 * 0.1)
     base *= conf_adjust
 
-    # 6) Adjust for applicant competition
     comp_factor = softened_competition_penalty(applicant_count) * (1.0 + success_probability * 0.2)
     base *= comp_factor
 
-    # 7) Recency & company size small bumps
     rec_adj = (recency_score - 0.5) * 0.1
     csize_adj = (company_size_score - 0.5) * 0.1
     base += (rec_adj + csize_adj)
 
-    # 8) Non-linear ramp above 0.70
     scaled = base * 1.3
     if scaled <= 0.7:
         final = scaled
@@ -154,7 +110,6 @@ def calculate_final_score(
         damped_extra = 0.3 * (1 - math.exp(-extra * 3))
         final = 0.7 + damped_extra
 
-    # 9) Ease factor
     ease_factor = 1.0 + ((30 - effort_days_to_fit) / 300)
     final *= ease_factor
     return max(min(final, 1.0), 0.01)
@@ -166,16 +121,6 @@ async def evaluate_and_update_job(
         conn,
         verbose: bool
 ) -> None:
-    """
-    Evaluate a single job with AI, compute a final score, and update the DB.
-
-    If AI extraction fails (0.0 for key fields), we skip and schedule a retry.
-
-    :param job: A job dictionary from the DB.
-    :param ai_model: The AIModel instance to run the evaluation.
-    :param conn: An open DB connection.
-    :param verbose: If True, prints detailed evaluation info to console.
-    """
     try:
         recency = calculate_recency_score(job['date'])
         applicant_count = job.get('applicants_count') or 0
@@ -196,21 +141,18 @@ async def evaluate_and_update_job(
         logger.debug(f"Job {job['id']} Reasoning: {reasoning}")
         logger.debug(f"Job {job['id']} Dev Areas: {dev_areas}")
 
-        # If all numeric are zero, skip updating & mark retry in 3 min
         if (sm == 0.0 and rs == 0.0 and ffs == 0.0):
             if not reasoning or "extraction failed" in reasoning.lower() or "error during evaluation" in dev_areas.lower():
                 logger.warning(f"Job {job['id']}: zero numeric & no valid reasoning => retry in 3 min.")
                 retry_map[job['id']] = time.time() + 180
                 return
 
-        # Otherwise, compute a final score
         company_size_val = calculate_company_size_score(job.get('company_size_score', 0))
         final_score = calculate_final_score(evaluation, recency, applicant_count, company_size_val)
         ranked_job = {**job, **evaluation, 'final_score': final_score}
         update_job_scores(conn, job['id'], ranked_job)
         logger.info(f"Job {job['id']} updated with final score: {final_score:.2f}")
 
-        # Optional console output if verbose
         if verbose:
             table = Table(title=f"Evaluation: {ranked_job['title']} @ {ranked_job['company']}")
             table.add_column("Metric", style="bold")
@@ -249,38 +191,51 @@ async def process_and_rank_jobs(
         verbose: bool,
         threads: int
 ) -> None:
-    """
-    Main concurrency loop for job processing:
-
-    1. Fetch up to `threads` jobs from DB.
-    2. Skip any job in `retry_map` if not yet eligible.
-    3. Evaluate + update each job in parallel.
-    4. Repeat until no new jobs are found, then sleep & retry.
-
-    :param config: Global config dictionary.
-    :param verbose: If True, logs additional info to console.
-    :param threads: Number of concurrent evaluations to run.
-    """
     conn = create_connection(config)
     add_fit_score_columns(conn)
 
     provider_manager = ProviderManager(config)
-    openrouter_keys = config.get("openrouter_api_keys", [])
-    if not openrouter_keys:
-        logger.warning("No OpenRouter keys found; concurrency with openrouter not possible.")
+    # Force default provider_mode to "together" if not set.
+    provider_mode = (config.get("ai_providers", {}).get("provider_mode", "together")).lower()
+    logger.debug(f"Provider mode from config: {provider_mode}")
 
-    # Prepare multiple AIModels if we want concurrency
+    if provider_mode == "together":
+        # Use .strip() in case there are any extraneous spaces.
+        together_key = config.get("ai_providers", {}).get("together_api_key", "").strip()
+        keys = [together_key] if together_key else []
+    elif provider_mode == "openrouter":
+        keys = config.get("ai_providers", {}).get("openrouter_api_keys", [])
+    elif provider_mode == "multi":
+        keys = []
+        openrouter_keys = config.get("ai_providers", {}).get("openrouter_api_keys", [])
+        keys.extend(openrouter_keys)
+        together_key = config.get("ai_providers", {}).get("together_api_key", "").strip()
+        if together_key:
+            keys.append(together_key)
+    else:
+        keys = []
+
+    logger.debug(f"API keys found: {keys}")
+    if not keys:
+        logger.error(f"No API keys found for provider mode '{provider_mode}'. Exiting.")
+        sys.exit(1)
+
     models = []
     for i in range(threads):
         sub_config = dict(config)
-        sub_config["openrouter_api_keys"] = [openrouter_keys[i % len(openrouter_keys)]] if openrouter_keys else []
+        if provider_mode == "together":
+            sub_config["ai_providers"]["together_api_key"] = keys[i % len(keys)]
+        elif provider_mode == "openrouter":
+            sub_config["ai_providers"]["openrouter_api_keys"] = [keys[i % len(keys)]]
+        elif provider_mode == "multi":
+            sub_config["ai_providers"]["openrouter_api_keys"] = [keys[i % len(keys)]]
+            sub_config["ai_providers"]["together_api_key"] = keys[i % len(keys)]
         model = AIModel(sub_config, provider_manager)
         models.append(model)
 
     while True:
         try:
             raw_jobs = get_jobs_for_scoring(conn, limit=threads)
-            # Filter out jobs that are in retry_map & not yet eligible
             jobs: List[Dict[str, Any]] = []
             now_ts = time.time()
             for j in raw_jobs:
@@ -318,25 +273,17 @@ async def main(
         endless: bool,
         threads: int
 ) -> None:
-    """
-    Primary entrypoint for job ranking. Loads config, sets verbosity,
-    then runs the main concurrency loop either once or in endless mode.
-
-    :param config_path: File path to the JSON config file.
-    :param verbose: If True, enable debug-level logging and rich console output.
-    :param endless: If True, repeats processing in a loop until interrupted.
-    :param threads: Number of concurrent evaluations.
-    """
     console.print("[bold blue]Starting job processing and ranking with concurrency (skip+retry on extraction fails)")
     try:
         config = load_config(config_path)
+        # print("DEBUG => FULL CONFIG:\n", config)
+        # print("DEBUG => together_api_key =", repr(config.get("together_api_key")))
+
         set_verbose(verbose)
 
         if not endless:
-            # Single pass
             await process_and_rank_jobs(config, verbose, threads)
         else:
-            # Endless loop
             while True:
                 await process_and_rank_jobs(config, verbose, threads)
                 logger.info("Waiting 60 sec before next pass in endless mode.")
@@ -353,7 +300,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "config",
         nargs="?",
-        default="jobfuq/conf/config.toml",
+        default="/Users/sasha/IdeaProjects/nomorejobfuckery/jobfuq/conf/config.toml",
         help="Path to config file"
     )
     parser.add_argument(
@@ -370,7 +317,7 @@ if __name__ == "__main__":
         "--threads",
         type=int,
         default=1,
-        help="Number of concurrent evaluations (each with unique OpenRouter key)"
+        help="Number of concurrent evaluations (each with unique API key)"
     )
     args = parser.parse_args()
 
