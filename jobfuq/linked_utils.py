@@ -432,52 +432,85 @@ def refined_clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 async def get_company_size(page: Any, url: str) -> str:
     """
-    Attempt to scrape the company size from the LinkedIn page.
-    Retries on failure up to 3 times with exponential backoff.
+    Scrape company size from a LinkedIn page.
+    Retries up to 3 times with exponential backoff.
     """
+
     try:
-        await page.goto(url, wait_until=linked_config.get("urls", {}).get("wait_until", "domcontentloaded"), timeout=30000)
+        await page.goto(
+            url,
+            wait_until=linked_config.get("urls", {}).get("wait_until", "domcontentloaded"),
+            timeout=30000
+        )
+        await page.wait_for_load_state("networkidle")  # Ensure full page load
         await simulate_human_behavior(page)
 
+        # Check if the page is 404 (not found)
         not_found_selector = linked_config.get("company", {}).get("not_found_selector", 'h1:has-text("Page not found")')
         if await page.query_selector(not_found_selector):
             logger.warning(f"Company page not found: {url}")
             return "Unknown"
 
-        emp_sel = linked_config.get("company", {}).get("employee_selector", ".org-top-card-summary-info-list__info-item")
-        await page.wait_for_selector(emp_sel, timeout=20000)
+        # Load size selectors from config
+        size_selectors = linked_config.get("company", {}).get("size_selectors", [
+            ".t-normal.t-black--light.link-without-visited-state.link-without-hover-state",
+            ".org-top-card-summary-info-list__info-item"
+        ])
 
-        # If there's a sub-selector with "employee" text
-        sub_sel = linked_config.get("company", {}).get(
-            "employee_selector",
-            ".org-top-card-summary-info-list__info-item:has-text(\"employee\")"
-        )
-        employee_count_element = await page.query_selector(sub_sel)
-        if employee_count_element:
-            size_text = await employee_count_element.inner_text()
-            return size_text.replace("employees", "").strip()
-        else:
-            logger.warning(f"Employee count not found on page: {url}")
-            return "Unknown"
+        for selector in size_selectors:
+            elements = await page.query_selector_all(selector)
+            for element in elements:
+                size_text = (await element.inner_text()).strip()
+                if size_text:
+                    return parse_company_size(size_text)  # Normalize and return
+
+        # Fallback: Scrape from company summary
+        summary_selector = ".org-top-card-summary-info-list"
+        summary_element = await page.query_selector(summary_selector)
+        if summary_element:
+            summary_text = (await summary_element.inner_text()).strip()
+            size_match = re.search(r"(\d{1,3}[Kk]?\+?)\s+employees?", summary_text)
+            if size_match:
+                return parse_company_size(size_match.group(1))
+
+        logger.warning(f"Employee count not found on page: {url}")
+        return "Unknown"
 
     except Exception as e:
         logger.error(f"Error scraping company size from {url}: {str(e)}")
         return "Unknown"
 
 
+def parse_company_size(size_text: str) -> str:
+    """
+    Extract numerical company size from different formats.
+    """
+
+    size_text = size_text.lower().strip()
+
+    # Convert common formats to standard format
+    size_text = re.sub(r"(\d+)[,](\d+)", r"\1\2", size_text)  # Remove commas (e.g., "1,001" -> "1001")
+    size_text = re.sub(r"(\d+)\s*-\s*(\d+)", r"\1-\2", size_text)  # Normalize ranges ("1,001-5,000" -> "1001-5000")
+    size_text = size_text.replace("k", "000").replace("K", "000").replace("+", "+")  # "10K+" -> "10000+"
+
+    return size_text
+
+
 def get_company_size_score(size_text: str) -> int:
     """
-    Convert a textual company size into a numeric score.
+    Convert textual company size into a numeric score.
     """
-    size_text = size_text.lower().strip()
+
+    size_text = parse_company_size(size_text)  # Normalize first
     if "unknown" in size_text:
         return 0
 
     size_map = linked_config.get("size_map", {})
-    for (key, score) in size_map.items():
+    for key, score in size_map.items():
         if key in size_text:
             return score
     return 0
