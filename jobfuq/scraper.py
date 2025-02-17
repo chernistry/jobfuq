@@ -29,6 +29,7 @@ from jobfuq.database import (
     create_connection,
     create_table,
     create_blacklist_table,
+    create_blacklisted_companies_table,
     load_blacklist,
     insert_job,
     job_exists,
@@ -515,6 +516,7 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
     conn = create_connection(config)
     create_table(conn)
     create_blacklist_table(conn)
+    create_blacklisted_companies_table(conn)
 
     try:
         blacklist = load_blacklist(conn)
@@ -699,6 +701,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
             conn = create_connection(config)
             create_table(conn)
             create_blacklist_table(conn)
+            create_blacklisted_companies_table(conn)
 
             try:
                 blacklist = load_blacklist(conn)
