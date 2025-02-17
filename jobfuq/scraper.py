@@ -66,7 +66,7 @@ class LinkedInScraper:
         self.config = config
         self.time_filter = time_filter
         self.blacklist_data = blacklist_data
-        self.playwright = playwright  # store the top-level playwright instance
+        self.playwright = playwright  # top-level playwright instance
 
         try:
             self.scraper_config = load_config("jobfuq/conf/linked_config.toml")
@@ -102,8 +102,9 @@ class LinkedInScraper:
         logger.info(f"Navigating to: {search_url}")
         await page.goto(search_url, wait_until=self.wait_until)
 
-        # Check for checkpoint/captcha and switch if needed
-        if "checkpoint/challenge" in page.url:
+        # Check for captcha/challenge page using the checkpoint indicator from config.
+        checkpoint_indicator = self.scraper_config.get("urls", {}).get("checkpoint_indicator", "checkpoint/challenge")
+        if checkpoint_indicator in page.url:
             page = await handle_manual_captcha(page, self.playwright, self.config)
 
         logger.info(f"Landed on: {page.url}")
@@ -142,6 +143,7 @@ class LinkedInScraper:
                 if not await self.go_to_next_page(page, page_num):
                     logger.info("Pagination failed / no more pages.")
                     break
+                # If URL does not change, break to avoid infinite loop.
                 if page.url == page.url:
                     break
                 page_num += 1
@@ -153,10 +155,10 @@ class LinkedInScraper:
         logger.info(f"Next page: {next_num}")
         for sel in self.scraper_config.get("pagination", {}).get("selectors", []):
             try:
-                formatted_sel = sel.format(page=next_num)
-            except Exception:
-                formatted_sel = sel
-            try:
+                try:
+                    formatted_sel = sel.format(page=next_num)
+                except Exception:
+                    formatted_sel = sel
                 btn = await page.query_selector(formatted_sel)
                 if btn:
                     disabled = (await btn.get_attribute("disabled")) or (await btn.get_attribute("aria-disabled"))
@@ -170,7 +172,6 @@ class LinkedInScraper:
                     return True
             except Exception as e:
                 logger.debug(f"Error with pagination '{formatted_sel}': {e}")
-
         logger.info(f"No valid pagination for page {next_num}.")
         return False
 
@@ -521,8 +522,10 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
     page = await context.new_page()
 
     if manual_login:
+        # Use login_url from configuration instead of hardcoding
+        login_url = load_config("jobfuq/conf/linked_config.toml").get("urls", {}).get("login_url", "https://www.linkedin.com/login")
         logger.info("Manual login selected. Navigating to LinkedIn login page. Please log in manually.")
-        await page.goto("https://www.linkedin.com/login", wait_until="networkidle")
+        await page.goto(login_url, wait_until="networkidle")
         await asyncio.to_thread(input, "Press Enter after you have logged in...")
         new_page = await wait_for_feed(page, playwright, config)
         if not new_page:
@@ -609,7 +612,8 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
 
     try:
         logger.info("Navigating to LinkedIn feed for cleanup.")
-        await page.goto("https://www.linkedin.com/feed/", wait_until=scraper.wait_until)
+        feed_url = load_config("jobfuq/conf/linked_config.toml").get("urls", {}).get("feed_url", "https://www.linkedin.com/feed/")
+        await page.goto(feed_url, wait_until=scraper.wait_until)
         await simulate_human_behavior(page)
     except Exception:
         pass

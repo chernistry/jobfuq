@@ -13,8 +13,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from jobfuq.logger import logger
 from jobfuq.utils import load_config
 
+# Load main config and override session store if specified
 SESSION_STORE_DIR = "session_store"
-
 try:
     main_config = load_config("jobfuq/conf/config.toml")
     session_override = main_config.get("sessions", {}).get("store_dir")
@@ -25,6 +25,7 @@ except Exception as e:
 
 os.makedirs(SESSION_STORE_DIR, exist_ok=True)
 
+# Determine scraping mode and load linked configuration
 scraping_mode = main_config.get("scraping", {}).get("mode", "normal").lower()
 linked_config = load_config("jobfuq/conf/linked_config.toml")
 
@@ -107,7 +108,6 @@ async def fake_http_traffic(page: Any) -> None:
     Generate benign HTTP requests from the same context to appear more human-like.
     """
     fake_http_url = linked_config.get("fake_http", {}).get("url", "https://httpbin.org/get")
-
     try:
         response = await page.context.request.get(
             fake_http_url,
@@ -184,7 +184,7 @@ async def simulate_human_behavior(page: Any) -> None:
         await asyncio.sleep(random.uniform(1, 2))
         return
 
-    # Full stealth
+    # Full stealth mode
     logger.debug("[STEALTH MODE] Applying full advanced stealth.")
     await scroll_randomly(page)
     await asyncio.sleep(random.uniform(1, 3))
@@ -234,7 +234,8 @@ async def handle_manual_captcha(page: Any, playwright: Any, config: Dict[str, An
         headless_browser = await playwright.chromium.launch(headless=True, slow_mo=50)
         new_context = await headless_browser.new_context(storage_state=updated_state)
         new_page2 = await new_context.new_page()
-        await new_page2.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
+        feed_url = linked_config.get("urls", {}).get("feed_url", "https://www.linkedin.com/feed/")
+        await new_page2.goto(feed_url, wait_until="domcontentloaded")
         logger.info("Switched back to headless mode. Continuing with new context.")
         return new_page2
     else:
@@ -243,16 +244,19 @@ async def handle_manual_captcha(page: Any, playwright: Any, config: Dict[str, An
         return page
 
 
-# [FIX] Modified wait_for_feed to return the current (possibly new) page instance.
 async def wait_for_feed(page: Any, playwright: Any, config: Dict[str, Any], timeout: int = 30000, interval: int = 1000) -> Optional[Any]:
+    """
+    Wait until the feed page is loaded, handling captcha or SSR login pages if detected.
+    """
     waited = 0
     feed_indicator = linked_config.get("urls", {}).get("feed_url_indicator", "linkedin.com/feed")
     ssr_login_indicator = linked_config.get("urls", {}).get("ssr_login_indicator", "linkedin.com/ssr-login")
+    checkpoint_indicator = linked_config.get("urls", {}).get("checkpoint_indicator", "checkpoint/challenge")
     current_page = page
     while waited < timeout:
         if feed_indicator in current_page.url:
             return current_page
-        if "checkpoint/challenge" in current_page.url:
+        if checkpoint_indicator in current_page.url:
             logger.info("Detected checkpoint challenge. Initiating captcha handling procedure.")
             current_page = await handle_manual_captcha(current_page, playwright, config)
             await asyncio.sleep(2)

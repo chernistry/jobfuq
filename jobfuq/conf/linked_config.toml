@@ -12,6 +12,8 @@ feed_url = "https://www.linkedin.com/feed/"
 login_url = "https://www.linkedin.com/login"
 feed_url_indicator = "linkedin.com/feed"
 ssr_login_indicator = "linkedin.com/ssr-login"
+# Checkpoint indicator used to detect captcha/challenge pages.
+checkpoint_indicator = "checkpoint/challenge"
 
 #######################################
 #         TIMEOUT SETTINGS            #
@@ -21,6 +23,8 @@ ssr_login_indicator = "linkedin.com/ssr-login"
 selector_timeout = 30000
 # Timeout for get_text_content (in milliseconds)
 get_text_timeout = 5000
+# Timeout for navigation (in milliseconds)
+navigation_timeout = 20000
 
 #######################################
 #         ATTRIBUTE SETTINGS          #
@@ -253,7 +257,7 @@ employee_selector = ".org-top-card-summary-info-list__info-item"
 "201-500 employees" = 4
 "501-1k" = 5
 "501-1,000" = 5
-"501-1,000 employees" = 5  # ✅ Added
+"501-1,000 employees" = 5
 "501-1000" = 5
 "501-1000 employees" = 5
 "1k-5k" = 6
@@ -272,3 +276,11 @@ employee_selector = ".org-top-card-summary-info-list__info-item"
 "10K+" = 8
 "10K+ employees" = 8
 "Unknown" = 0  # Default score for unknown sizes
+
+#######################################
+#         LOGIN SETTINGS              #
+#######################################
+[login]
+username_selector = "input#username"
+password_selector = "input#password"
+submit_selector = "button[type='submit']"
