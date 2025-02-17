@@ -5,10 +5,7 @@ This module contains functions for creating and managing the SQLite database use
 It supports operations such as creating tables (job_listings and blacklist), inserting/updating job records,
 loading blacklist data, and querying jobs for processing while filtering out blacklisted titles.
 
-Blacklist Filtering Logic:
-- A job title is filtered out if it contains any term from the blacklist.
-- However, if the title also contains any term from the whitelist, the blacklist filter is overridden.
-- The SQL queries are stored in a separate sql_queries.toml file and loaded at runtime.
+SQL queries are stored as individual .sql files in the "sql" folder.
 """
 
 import os
@@ -17,21 +14,31 @@ import time
 import re
 from typing import Any, Dict, List, Set, Tuple
 
-import toml
 from jobfuq.logger import logger
 
-SQL_QUERIES = None
+# Global cache for SQL queries.
+SQL_QUERIES: Dict[str, str] = {}
 
 def load_sql_queries() -> Dict[str, str]:
     """
-    Load SQL query strings from the sql_queries.toml file.
+    Load SQL query strings from separate .sql files located in the 'sql' folder.
+    Each file's name (without the .sql extension) is used as the key.
     """
     global SQL_QUERIES
-    if SQL_QUERIES is None:
-        path = os.path.join(os.path.dirname(__file__), "conf/sql_queries.toml")
-        with open(path, "r") as f:
-            data = toml.load(f)
-            SQL_QUERIES = data.get("queries", {})
+    if SQL_QUERIES:
+        return SQL_QUERIES
+
+    sql_dir = os.path.join(os.path.dirname(__file__), "sql")
+    if not os.path.isdir(sql_dir):
+        raise FileNotFoundError(f"SQL directory not found: {sql_dir}")
+
+    for filename in os.listdir(sql_dir):
+        if filename.endswith(".sql"):
+            key = os.path.splitext(filename)[0]  # filename without extension
+            file_path = os.path.join(sql_dir, filename)
+            with open(file_path, "r", encoding="utf-8") as f:
+                SQL_QUERIES[key] = f.read().strip()
+
     return SQL_QUERIES
 
 def add_fit_score_columns(conn: sqlite3.Connection) -> None:
@@ -43,7 +50,7 @@ def add_fit_score_columns(conn: sqlite3.Connection) -> None:
         ('resume_similarity', 'REAL', 0.0),
         ('final_fit_score', 'REAL', 0.0),
         ('final_score', 'REAL', 0.0),
-        ('success_probability', 'REAL', 0.0),
+        ('success_probability', 'REAL', 0.6),
         ('confidence', 'REAL', 0.7),
         ('effort_days_to_fit', 'INTEGER', 14),
         ('critical_skill_mismatch_penalty', 'REAL', 0.0),
