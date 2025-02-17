@@ -30,6 +30,12 @@ WITH RankedJobs AS (
       AND jl.description IS NOT NULL
       AND TRIM(jl.description) <> ''
       AND jl.description <> 'About the job'
+      -- Исключаем компании из нового blacklist
+      AND NOT EXISTS (
+        SELECT 1 FROM blacklisted_companies bc
+        WHERE LOWER(jl.company) = LOWER(bc.company)
+    )
+      -- Исключаем вакансии по ключевым словам из blacklist, но учитываем whitelist
       AND NOT EXISTS (
         SELECT 1 FROM blacklist bl
         WHERE bl.type = 'blacklist'
@@ -47,6 +53,12 @@ SELECT *,
           AND jl.application_status LIKE 'not applied%'
           AND jl.company IS NOT NULL
           AND jl.final_score IS NULL
+          -- Исключаем компании из нового blacklist
+          AND NOT EXISTS (
+            SELECT 1 FROM blacklisted_companies bc
+            WHERE LOWER(jl.company) = LOWER(bc.company)
+        )
+          -- Исключаем вакансии по ключевым словам из blacklist, но учитываем whitelist
           AND NOT EXISTS (
             SELECT 1 FROM blacklist bl
             WHERE bl.type = 'blacklist'
