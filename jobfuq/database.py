@@ -70,11 +70,21 @@ def add_fit_score_columns(conn: sqlite3.Connection) -> None:
 def create_blacklist_table(conn: sqlite3.Connection) -> None:
     """
     Create the blacklist table if it does not exist.
+    The updated schema now includes a 'company' column for company-specific blacklisting.
     """
-    queries = load_sql_queries()
-    conn.execute(queries["create_blacklist_table"])
+    # If your SQL files are used, update the "create_blacklist_table" SQL file.
+    # Otherwise, create the table here.
+    create_table_sql = """
+    CREATE TABLE IF NOT EXISTS blacklist (
+        id INTEGER PRIMARY KEY,
+        value TEXT NOT NULL,
+        type TEXT NOT NULL,
+        company TEXT
+    );
+    """
+    conn.execute(create_table_sql)
     conn.commit()
-    logger.info("Created or verified blacklist table.")
+    logger.info("Created or verified blacklist table with company column.")
 
 def create_connection(config: Dict[str, Any]) -> sqlite3.Connection:
     """
@@ -114,10 +124,11 @@ def insert_job(conn: sqlite3.Connection, job: Dict[str, Any]) -> None:
 
 def is_company_blacklisted(conn: sqlite3.Connection, company_name: str, company_url: str) -> bool:
     """
-    Check whether a company is blacklisted based on its name or URL.
+    Check whether a company is blacklisted based on its name.
+    This function now searches the dedicated 'company' column.
     """
-    queries = load_sql_queries()
-    cursor = conn.execute(queries["is_company_blacklisted"], (company_name, company_url))
+    query = "SELECT COUNT(*) FROM blacklist WHERE company IS NOT NULL AND LOWER(company) = LOWER(?)"
+    cursor = conn.execute(query, (company_name,))
     return cursor.fetchone()[0] > 0
 
 def job_exists(conn: sqlite3.Connection, job_url: str) -> bool:
@@ -151,12 +162,15 @@ def get_jobs_for_scoring(conn: sqlite3.Connection, limit: int = 1) -> List[Dict[
 def load_blacklist(conn: sqlite3.Connection) -> Dict[str, Set[str]]:
     """
     Load blacklist and whitelist data from the database.
+    In addition to text-based filters, company-specific blacklist entries are loaded.
     """
     queries = load_sql_queries()
+    # Update the query if using SQL files; otherwise, use inline SQL.
+    query = "SELECT type, value, company FROM blacklist"
     try:
-        cursor = conn.execute(queries["load_blacklist"])
-        bl_data: Dict[str, Set[str]] = {"blacklist": set(), "whitelist": set()}
-        for typ, val in cursor.fetchall():
+        cursor = conn.execute(query)
+        bl_data: Dict[str, Set[str]] = {"blacklist": set(), "whitelist": set(), "company_blacklist": set()}
+        for typ, val, company in cursor.fetchall():
             typ = typ.strip().lower()
             val = val.strip()
             if typ in bl_data:
@@ -164,10 +178,12 @@ def load_blacklist(conn: sqlite3.Connection) -> Dict[str, Set[str]]:
             else:
                 # If an unknown type is encountered, default it to blacklist.
                 bl_data["blacklist"].add(val)
+            if company and company.strip():
+                bl_data["company_blacklist"].add(company.strip())
         return bl_data
     except Exception as e:
         logger.error(f"Error loading blacklist: {e}")
-        return {"blacklist": set(), "whitelist": set()}
+        return {"blacklist": set(), "whitelist": set(), "company_blacklist": set()}
 
 def update_job_scores(conn: sqlite3.Connection, job_id: int, ranked_job: Dict[str, Any]) -> None:
     """
