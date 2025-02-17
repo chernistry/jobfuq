@@ -119,7 +119,6 @@ async def fake_http_traffic(page: Any) -> None:
         logger.debug(f"Fake HTTP traffic response: {response.status} - {await response.text()}")
     except Exception as e:
         logger.debug(f"Fake HTTP traffic error: {e}")
-        # optionally add small delay / retry logic here
 
 
 async def generate_realistic_mouse_physics(page: Any) -> None:
@@ -217,30 +216,21 @@ async def handle_manual_captcha(page: Any, playwright: Any, config: Dict[str, An
     """
     if config.get("headless", False):
         logger.info("Detected captcha/ checkpoint in headless mode. Restarting browser in headful mode for captcha solving.")
-
-        # 1) Save the storage state so we can preserve session
         storage_state = await page.context.storage_state()
-
-        # 2) Close the current browser
         current_browser = page.context.browser
         await current_browser.close()
 
-        # 3) Launch a new headful browser
         browser_headful = await playwright.chromium.launch(headless=False, slow_mo=50)
         context_headful = await browser_headful.new_context(storage_state=storage_state)
         new_page = await context_headful.new_page()
         await new_page.goto(page.url, wait_until="domcontentloaded")
         logger.info("Browser switched to headful mode. Solve the captcha manually in the opened window.")
-
-        # 4) Wait for user
         await asyncio.to_thread(input, "Press Enter after you have solved the captcha and the page has loaded...")
 
-        # 5) Grab updated state
         updated_state = await context_headful.storage_state()
         await browser_headful.close()
         logger.info("Captcha solved. Relaunching headless browser with updated session state.")
 
-        # 6) Re-launch headless browser
         headless_browser = await playwright.chromium.launch(headless=True, slow_mo=50)
         new_context = await headless_browser.new_context(storage_state=updated_state)
         new_page2 = await new_context.new_page()
@@ -253,33 +243,27 @@ async def handle_manual_captcha(page: Any, playwright: Any, config: Dict[str, An
         return page
 
 
-async def wait_for_feed(page: Any, playwright: Any, config: Dict[str, Any], timeout: int = 30000, interval: int = 1000) -> bool:
-    """
-    Poll the URL for feed page presence. If we hit checkpoint/captcha, call handle_manual_captcha.
-    """
+# [FIX] Modified wait_for_feed to return the current (possibly new) page instance.
+async def wait_for_feed(page: Any, playwright: Any, config: Dict[str, Any], timeout: int = 30000, interval: int = 1000) -> Optional[Any]:
     waited = 0
     feed_indicator = linked_config.get("urls", {}).get("feed_url_indicator", "linkedin.com/feed")
     ssr_login_indicator = linked_config.get("urls", {}).get("ssr_login_indicator", "linkedin.com/ssr-login")
-
+    current_page = page
     while waited < timeout:
-        current_url = page.url
-        if feed_indicator in current_url:
-            return True
-        # If checkpoint, handle it
-        if "checkpoint/challenge" in current_url:
+        if feed_indicator in current_page.url:
+            return current_page
+        if "checkpoint/challenge" in current_page.url:
             logger.info("Detected checkpoint challenge. Initiating captcha handling procedure.")
-            page = await handle_manual_captcha(page, playwright, config)
-            # after returning from handle_manual_captcha, check feed again
+            current_page = await handle_manual_captcha(current_page, playwright, config)
             await asyncio.sleep(2)
-        elif ssr_login_indicator in current_url:
+        elif ssr_login_indicator in current_page.url:
             logger.info("Detected ssr-login page, waiting 5 seconds...")
             await asyncio.sleep(5)
             waited += 5000
         else:
             await asyncio.sleep(interval / 1000)
             waited += interval
-
-    return False
+    return None
 
 
 async def type_like_human(page: Any, selector: str, text: str) -> None:
@@ -375,10 +359,8 @@ async def rotate_session(context: Any) -> bool:
     return False
 
 
-async def ensure_logged_in(page: Any, username: str, password: str, playwright: Any, config: Dict[str, Any]) -> bool:
-    """
-    Log in to LinkedIn using a saved session if available.
-    """
+# [FIX] Modified ensure_logged_in to return the valid (new) page instance.
+async def ensure_logged_in(page: Any, username: str, password: str, playwright: Any, config: Dict[str, Any]) -> Optional[Any]:
     try:
         await apply_stealth_scripts(page)
         session_loaded = await load_session(page, username)
@@ -388,16 +370,15 @@ async def ensure_logged_in(page: Any, username: str, password: str, playwright: 
         login_url = urls_conf.get("login_url", "https://www.linkedin.com/login")
         wait_until = urls_conf.get("wait_until", "domcontentloaded")
 
-        # 1) If we have a saved session, check if we can go directly to feed
         if session_loaded:
             await page.goto(feed_url, wait_until=wait_until, timeout=20000)
-            if await wait_for_feed(page, playwright, config):
+            new_page = await wait_for_feed(page, playwright, config)
+            if new_page:
                 logger.debug(f"Using saved session for account: {username}")
-                return True
+                return new_page
             else:
                 logger.debug(f"Session for {username} didn't load feed. Logging in fresh.")
 
-        # 2) Otherwise, do normal login
         await page.goto(login_url, wait_until=wait_until)
         await simulate_human_behavior(page)
 
@@ -406,29 +387,26 @@ async def ensure_logged_in(page: Any, username: str, password: str, playwright: 
             await type_like_human(page, "input#username", username)
             await type_like_human(page, "input#password", password)
         else:
-            # fallback
             password_input = await page.query_selector("input#password")
             if password_input:
                 await type_like_human(page, "input#password", password)
             else:
                 logger.error("Neither username nor password field found!")
-                return False
+                return None
 
         await move_mouse_and_click(page, 'button[type="submit"]')
-
-        if not await wait_for_feed(page, playwright, config):
+        new_page = await wait_for_feed(page, playwright, config)
+        if not new_page:
             logger.error(f"Login failed for account {username}. Unexpected URL: {page.url}")
-            return False
+            return None
 
-        # 3) Save updated session
         logger.debug(f"Successfully logged in: {username}")
         session_path = os.path.join(SESSION_STORE_DIR, f"linkedin_session_{username}.json")
         await page.context.storage_state(path=session_path)
-        return True
-
+        return new_page
     except Exception as e:
         logger.error(f"Login failed for account {username}: {e}")
-        return False
+        return None
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -463,7 +441,6 @@ async def get_company_size(page: Any, url: str) -> str:
                 if size_text:
                     return parse_company_size(size_text)
 
-        # Fallback
         summary_selector = ".org-top-card-summary-info-list"
         summary_element = await page.query_selector(summary_selector)
         if summary_element:
@@ -485,8 +462,8 @@ def parse_company_size(size_text: str) -> str:
     Extract numerical company size from different formats.
     """
     size_text = size_text.lower().strip()
-    size_text = re.sub(r"(\d+)[,](\d+)", r"\1\2", size_text)  # remove commas: e.g. "1,001" -> "1001"
-    size_text = re.sub(r"(\d+)\s*-\s*(\d+)", r"\1-\2", size_text)  # e.g. "1,001 - 5,000" -> "1001-5000"
+    size_text = re.sub(r"(\d+)[,](\d+)", r"\1\2", size_text)
+    size_text = re.sub(r"(\d+)\s*-\s*(\d+)", r"\1-\2", size_text)
     size_text = size_text.replace("k", "000").replace("K", "000").replace("+", "+")
     return size_text
 

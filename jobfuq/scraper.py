@@ -102,14 +102,13 @@ class LinkedInScraper:
         logger.info(f"Navigating to: {search_url}")
         await page.goto(search_url, wait_until=self.wait_until)
 
-        # Check for checkpoint/captcha
+        # Check for checkpoint/captcha and switch if needed
         if "checkpoint/challenge" in page.url:
             page = await handle_manual_captcha(page, self.playwright, self.config)
 
         logger.info(f"Landed on: {page.url}")
         await simulate_human_behavior(page)
 
-        # Wait for job list
         for sel in self.scraper_config.get("jobs", {}).get("job_list_selectors", []):
             try:
                 await page.wait_for_selector(sel, timeout=self.selector_timeout)
@@ -125,7 +124,6 @@ class LinkedInScraper:
         while len(job_infos) < max_postings:
             logger.info(f"Current page: {page.url}")
             job_infos.extend(await self.extract_job_infos(page))
-            # deduplicate by job_id
             job_infos = list({x["job_id"]: x for x in job_infos}.values())
             logger.info(f"Total jobs so far: {len(job_infos)}")
 
@@ -133,7 +131,6 @@ class LinkedInScraper:
                 break
 
             old_count = len(job_infos)
-            # Scroll and see if more appear
             await page.evaluate("window.scrollBy(0, 5000)")
             await asyncio.sleep(random.uniform(2, 3))
 
@@ -145,7 +142,6 @@ class LinkedInScraper:
                 if not await self.go_to_next_page(page, page_num):
                     logger.info("Pagination failed / no more pages.")
                     break
-                # If the URL hasn't changed, we break
                 if page.url == page.url:
                     break
                 page_num += 1
@@ -217,7 +213,6 @@ class LinkedInScraper:
             title = (await title_elem.text_content()).strip() if title_elem else ""
             logger.info(f"Extracted title: '{title}'")
 
-            # Check blacklist on title
             if title and any(bk in title.lower() for bk in blacklist) and not any(wk in title.lower() for wk in whitelist):
                 logger.info(f"Skipped blacklisted: '{title}'")
                 continue
@@ -251,7 +246,6 @@ class LinkedInScraper:
                     if descr:
                         break
 
-            # Attempt to parse small applicant count from the card itself
             applicants_count = await self.extract_applicants_count(card)
 
             csize = None
@@ -287,15 +281,11 @@ class LinkedInScraper:
         return await self.fetch_applicants_count(card)
 
     async def fetch_applicants_count(self, context_obj: Any) -> Optional[int]:
-        """
-        Attempt to fetch applicants count from an element or the entire page if needed.
-        """
         au_conf = self.scraper_config.get("applicants_update", {})
         selectors = au_conf.get("selectors", [])
         xpaths = au_conf.get("xpaths", [])
         patterns = au_conf.get("patterns", [])
 
-        # 1) Try the selectors
         for sel in selectors:
             try:
                 elem = await context_obj.query_selector(sel)
@@ -308,7 +298,6 @@ class LinkedInScraper:
             except Exception:
                 continue
 
-        # 2) Try the xpaths
         for xpath in xpaths:
             try:
                 elem = await context_obj.query_selector(f"xpath={xpath}")
@@ -321,7 +310,6 @@ class LinkedInScraper:
             except Exception:
                 continue
 
-        # 3) Check the entire text content of the element
         try:
             full_text = (await context_obj.text_content() or "").strip()
             for pattern in patterns:
@@ -331,7 +319,6 @@ class LinkedInScraper:
         except Exception:
             pass
 
-        # 4) fallback: check entire page
         try:
             page = getattr(context_obj, "page", None) or context_obj
             full_page_text = await page.evaluate("document.body.innerText")
@@ -346,9 +333,6 @@ class LinkedInScraper:
         return None
 
     async def get_job_details(self, page: Any, job_id: str, conn: Any = None, **kwargs) -> Optional[Dict[str, Any]]:
-        """
-        Retrieves detailed job information by going to the job's unique URL.
-        """
         jurl = f"{self.base_url}/jobs/view/{job_id}/"
         logger.info(f"Job detail: {jurl}")
 
@@ -362,14 +346,12 @@ class LinkedInScraper:
             logger.error(f"Error for job {job_id}: {e}")
             return None
 
-        # If the job is closed
         closed_app_text = self.scraper_config.get("applicants_update", {}).get("closed_application_text", "no longer accepting applications").lower()
         feedback_elem = await page.query_selector(".artdeco-inline-feedback__message")
         if feedback_elem:
             feedback_text = (await feedback_elem.text_content() or "").strip().lower()
             if closed_app_text in feedback_text:
                 logger.info(f"Job {job_id} is closed (no longer accepting applications).")
-                # Optionally update DB
                 if conn:
                     current_time = int(time.time() * 1000)
                     conn.execute(
@@ -379,7 +361,6 @@ class LinkedInScraper:
                     conn.commit()
                 return None
 
-        # Extract details
         detail_conf = self.scraper_config.get("detail", {})
         title_selectors = detail_conf.get("title_selectors", [])
         company_selectors = detail_conf.get("company_selectors", [])
@@ -392,8 +373,6 @@ class LinkedInScraper:
         loc = await self.get_field_content(page, location_selectors, default="")
         descr = await self.get_field_content(page, description_selectors, default="")
         applicants_count = await self.fetch_applicants_count(page)
-
-        # company size from detail
         company_size = await self.get_field_content(page, company_size_selectors, default="Unknown")
 
         job_data = {
@@ -511,14 +490,12 @@ async def run_scrape(config: Dict[str, Any], browser: Any, search_queries: List[
     Main function that spawns job-scraping tasks.
     """
     if endless:
-        # scrape in infinite loop
         while True:
             async for job in get_jobcards(config, browser, search_queries, manual_login, args, playwright):
                 pass
             logger.info("Round complete. Waiting 60 sec...")
             await asyncio.sleep(60)
     else:
-        # single pass
         async for job in get_jobcards(config, browser, search_queries, manual_login, args, playwright):
             pass
 
@@ -547,13 +524,16 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
         logger.info("Manual login selected. Navigating to LinkedIn login page. Please log in manually.")
         await page.goto("https://www.linkedin.com/login", wait_until="networkidle")
         await asyncio.to_thread(input, "Press Enter after you have logged in...")
-        if not await wait_for_feed(page, playwright, config):
+        new_page = await wait_for_feed(page, playwright, config)
+        if not new_page:
             logger.warning("Feed did not load. Checking if a captcha page is open...")
             if "checkpoint/challenge" in page.url:
                 page = await handle_manual_captcha(page, playwright, config)
             else:
                 logger.error("Unknown issue: login completed but feed did not load.")
                 return
+        else:
+            page = new_page
         logger.info("Manual login complete.")
     else:
         creds_pool = config.get("linkedin_credentials", {}).values()
@@ -563,12 +543,13 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
         creds = random.choice(list(creds_pool))
         username, password = creds["username"], creds["password"]
         logger.info(f"Auto-login with => {username}")
-        if not await ensure_logged_in(page, username, password, playwright, config):
+        logged_in_page = await ensure_logged_in(page, username, password, playwright, config)
+        if not logged_in_page:
             logger.error("Auto-login failed. Aborting.")
             return
+        page = logged_in_page
         logger.info("Logged in.")
 
-    # Time filter
     time_filter = config.get("time_filter", "r604800")
     scraper = LinkedInScraper(config, time_filter, blacklist, playwright=playwright)
 
@@ -583,7 +564,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
             await detail_page.route("**/*", block_resources)
             try:
                 split_url = debug_job_url.rstrip("/").split("/")
-                # last piece of the path is presumably the job id
                 job_id = split_url[-1] or split_url[-2]
                 job_data = await scraper.get_job_details(detail_page, job_id)
             except Exception as e:
@@ -593,7 +573,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
             if job_data:
                 yield job_data
     else:
-        # Normal search mode
         for query in search_queries:
             kw, loc, remote = query["keywords"], query["location"], query.get("remote")
             logger.info(f"Scraping => kw={kw}, loc={loc}, remote={remote}")
@@ -603,7 +582,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
             for info in job_infos:
                 job_url = f"{scraper.base_url}/jobs/view/{info['job_id']}/"
                 if job_exists(conn, job_url):
-                    # Check if outdated
                     cursor = conn.execute("SELECT last_checked FROM job_listings WHERE job_url = ?", (job_url,))
                     row = cursor.fetchone()
                     current_time = int(time.time() * 1000)
@@ -629,7 +607,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
                     if isinstance(detail, dict) and detail:
                         yield detail
 
-    # Cleanup
     try:
         logger.info("Navigating to LinkedIn feed for cleanup.")
         await page.goto("https://www.linkedin.com/feed/", wait_until=scraper.wait_until)
@@ -654,20 +631,16 @@ async def fetch_job_detail_task(scraper: LinkedInScraper, info: Dict[str, Any], 
             if not job_data:
                 return None
 
-            # If blacklisted
             title_lower = job_data["title"].lower()
             if (any(bk in title_lower for bk in blacklist["blacklist"]) and
                     not any(wk in title_lower for wk in blacklist["whitelist"])):
                 logger.info(f"Skipping blacklisted job: {job_data['title']}")
                 return None
 
-            # Also check company or job_url
-            if (
-                    job_data.get("company_url", "").lower() in [x.lower() for x in blacklist["blacklist"]]
+            if (job_data.get("company_url", "").lower() in [x.lower() for x in blacklist["blacklist"]]
                     or job_data["company"].lower() in [x.lower() for x in blacklist["blacklist"]]
                     or job_data["job_url"].lower() in [x.lower() for x in blacklist["blacklist"]]
-                    or is_company_blacklisted(conn, job_data["company"], job_data.get("company_url", ""))
-            ):
+                    or is_company_blacklisted(conn, job_data["company"], job_data.get("company_url", ""))):
                 logger.info(f"Skipping blacklisted: {job_data['title']} at {job_data['company']}")
                 return None
 
@@ -708,7 +681,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
         browser = await p.chromium.launch(headless=headless_mode, slow_mo=50)
 
         if args.debug_single or config.get("debug", {}).get("enabled", False):
-            # Debug logic
             logger.info("Debug mode enabled.")
             dbg = config.get("debug", {})
             conn = create_connection(config)
@@ -742,10 +714,11 @@ async def main_scraper(args: argparse.Namespace) -> None:
                 username, password = creds["username"], creds["password"]
                 logger.info(f"Auto-login with => {username}")
 
-                # Using our updated ensure_logged_in
-                if not await ensure_logged_in(page, username, password, p, config):
+                logged_in_page = await ensure_logged_in(page, username, password, p, config)
+                if not logged_in_page:
                     logger.error("Auto-login failed. Aborting debug.")
                     return
+                page = logged_in_page
                 logger.info("Logged in.")
 
             scraper = LinkedInScraper(config, config.get("time_filter", "r604800"), blacklist, playwright=p)
@@ -802,7 +775,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         logger.info("Debug extracted:\n" + json.dumps(job_data, indent=2))
                     else:
                         logger.error(f"Failed for job id {info['job_id']}")
-
             elif mode == "rescrape_by_db_query":
                 sql_query = dbg.get("sql_query")
                 if not sql_query:
@@ -847,7 +819,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
             conn.close()
             await browser.close()
             return
-        # Normal recipe handling
         recipe = args.recipe.split(",") if args.recipe else ["scrap", "process"]
         tasks = []
 
