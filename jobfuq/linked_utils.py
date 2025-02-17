@@ -10,7 +10,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Route, 
 from playwright._impl._browser_type import BrowserType
 from faker import Faker
 from tenacity import retry, stop_after_attempt, wait_exponential
-from jobfuq.captcha_solver.solver import Funcap
+# from jobfuq.captcha_solver.solver import Funcap
 
 from jobfuq.logger import logger
 from jobfuq.utils import load_config
@@ -409,28 +409,30 @@ async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
         return False
 
 
-def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> Any:
-    async def _wait() -> bool:
-        waited = 0
-        feed_indicator = linked_config.get("urls", {}).get("feed_url_indicator", "linkedin.com/feed")
-        ssr_login_indicator = linked_config.get("urls", {}).get("ssr_login_indicator", "linkedin.com/ssr-login")
-        while waited < timeout:
-            current_url = page.url
-            if feed_indicator in current_url:
-                return True
-            if "checkpoint/challenge" in current_url:
-                logger.info("Detected checkpoint challenge, attempting captcha solution...")
-                await handle_captcha(page)
-            if ssr_login_indicator in current_url:
-                logger.info("Detected ssr-login page, waiting 5 seconds...")
-                await asyncio.sleep(5)
-                waited += 5000
-            else:
-                await asyncio.sleep(interval / 1000)
-                waited += interval
-        return False
-    return _wait()
+async def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> bool:
+    waited = 0
+    feed_indicator = linked_config.get("urls", {}).get("feed_url_indicator", "linkedin.com/feed")
+    ssr_login_indicator = linked_config.get("urls", {}).get("ssr_login_indicator", "linkedin.com/ssr-login")
 
+    while waited < timeout:
+        current_url = page.url
+        if feed_indicator in current_url:
+            return True
+        if "checkpoint/challenge" in current_url:
+            logger.info("Detected checkpoint challenge. Please solve the captcha manually.")
+            await handle_manual_captcha(page)
+        if ssr_login_indicator in current_url:
+            logger.info("Detected ssr-login page, waiting 5 seconds...")
+            await asyncio.sleep(5)
+            waited += 5000
+        else:
+            await asyncio.sleep(interval / 1000)
+            waited += interval
+    return False
+
+async def handle_manual_captcha(page: Any):
+    logger.info("Solve the captcha in the browser and press Enter when done...")
+    await asyncio.to_thread(input, "Press Enter when you have manually solved the captcha and the page has loaded.")
 
 async def type_like_human(page: Any, selector: str, text: str) -> None:
     """

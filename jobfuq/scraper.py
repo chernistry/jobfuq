@@ -9,7 +9,7 @@ from jobfuq.utils import load_config
 from jobfuq.database import create_connection, create_table, create_blacklist_table, load_blacklist, insert_job, job_exists, is_company_blacklisted
 from jobfuq.processor import process_and_rank_jobs
 from jobfuq.llm_handler import AIModel
-from jobfuq.linked_utils import handle_captcha, wait_for_feed
+from jobfuq.linked_utils import  wait_for_feed, handle_manual_captcha
 
 console = Console()
 
@@ -61,7 +61,7 @@ class LinkedInScraper:
             search_url += "&f_WT=1"
         logger.info(f"Navigating to: {search_url}")
         await page.goto(search_url, wait_until=self.wait_until)
-        await handle_captcha(page)
+        # await handle_captcha(page)
 
         logger.info(f"Landed on: {page.url}")
         await simulate_human_behavior(page)
@@ -408,32 +408,37 @@ async def run_scrape(config: Dict[str, Any], browser: Any, search_queries: List[
             pass
 
 async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: List[Dict[str, Any]], manual_login: bool, args: Optional[argparse.Namespace]) -> Any:
-    conn = create_connection(config)
+    conn = create_connection(config)  # Подключаемся к БД
     create_table(conn)
     create_blacklist_table(conn)
+
+
     try:
         blacklist = load_blacklist(conn)
     except Exception as e:
         logger.error(f"Error loading blacklist: {e}")
         blacklist = {"blacklist": set(), "whitelist": set()}
+
     context = await browser.new_context(
         viewport={"width": 1280 + random.randint(-50, 50), "height": 720 + random.randint(-30, 30)},
         user_agent=random.choice(config.get("user_agents", ["Mozilla/5.0"]))
     )
     page = await context.new_page()
     await page.route("**/*", block_resources)
+
     if manual_login:
         logger.info("Manual login selected. Navigating to LinkedIn login page. Please log in manually.")
-        await page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
-        # Переносим input() в отдельный поток, чтобы не блокировать event loop:
+        await page.goto("https://www.linkedin.com/login", wait_until="networkidle")
         await asyncio.to_thread(input, "Press Enter after you have logged in...")
-        # После ручного ввода можно подождать, пока страница не перейдет на ленту
+
         if not await wait_for_feed(page):
-            logger.error("Manual login failed to load feed after login.")
-            return
+            logger.warning("Feed did not load. Checking if a captcha page is open...")
+            if "checkpoint/challenge" in page.url:
+                await handle_manual_captcha(page)
+            else:
+                logger.error("Unknown issue: Login completed but feed did not load.")
+                return
         logger.info("Manual login complete.")
-
-
 
     else:
         creds_pool = config.get("linkedin_credentials", {}).values()
@@ -447,6 +452,7 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
             logger.error("Auto-login failed. Aborting.")
             return
         logger.info("Logged in.")
+
     time_filter = config.get("time_filter", "r604800")
     scraper = LinkedInScraper(config, time_filter, blacklist)
     max_parallel = config.get("concurrent_details", 1)
