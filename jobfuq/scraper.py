@@ -184,44 +184,88 @@ class LinkedInScraper:
         return desc_text if desc_text else default
 
     async def get_job_details(self, page: Any, job_id: str, search_card_info: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        jurl = f"{self.base_url}/jobs/view/{job_id}/"; logger.info(f"Job detail: {jurl}")
+        jurl = f"{self.base_url}/jobs/view/{job_id}/"
+        logger.info(f"Job detail: {jurl}")
         try:
-            await page.goto(jurl, wait_until=self.wait_until); await simulate_human_behavior(page)
+            await page.goto(jurl, wait_until=self.wait_until)
+            await simulate_human_behavior(page)
         except PlaywrightTimeoutError:
-            logger.error(f"Timeout for job {job_id}"); return None
+            logger.error(f"Timeout for job {job_id}")
+            return None
         except Exception as e:
-            logger.error(f"Error for job {job_id}: {e}"); return None
+            logger.error(f"Error for job {job_id}: {e}")
+            return None
+
+        # NEW: Check if the job is no longer accepting applications
+        closed_app_text = self.scraper_config.get("applicants_update", {}).get("closed_application_text", "no longer accepting applications").lower()
+        feedback_elem = await page.query_selector(".artdeco-inline-feedback__message")
+        if feedback_elem:
+            feedback_text = (await feedback_elem.text_content() or "").strip().lower()
+            if closed_app_text in feedback_text:
+                logger.info(f"Job {job_id} is closed (no longer accepting applications). Skipping addition to DB.")
+                return None
+
         if self.config.get("debug", {}).get("force_expand", False):
             try:
                 if (btn := await page.query_selector("button.jobs-description__expand")):
-                    await btn.click(); await asyncio.sleep(1); logger.info("Clicked 'See more'")
-            except Exception as e: logger.warning(f"'See more' click failed: {e}")
+                    await btn.click()
+                    await asyncio.sleep(1)
+                    logger.info("Clicked 'See more'")
+            except Exception as e:
+                logger.warning(f"'See more' click failed: {e}")
+
         try:
             detail = self.scraper_config.get("detail", {})
-            title_selectors, company_selectors = detail.get("title_selectors", []), detail.get("company_selectors", [])
-            location_selectors, description_selectors = detail.get("location_selectors", []), detail.get("description_selectors", [])
-            posted_time_selectors, company_url_selectors = detail.get("posted_time_selectors", []), detail.get("company_url_selectors", [])
+            title_selectors = detail.get("title_selectors", [])
+            company_selectors = detail.get("company_selectors", [])
+            location_selectors = detail.get("location_selectors", [])
+            description_selectors = detail.get("description_selectors", [])
+            posted_time_selectors = detail.get("posted_time_selectors", [])
+            company_url_selectors = detail.get("company_url_selectors", [])
             company_size_selectors = detail.get("company_size_selectors", [])
+
             title = search_card_info["title"] if search_card_info else ""
             company = search_card_info["company"] if search_card_info else ""
             loc = search_card_info["location"] if search_card_info else ""
             descr = search_card_info["description"] if search_card_info else ""
-            if not title: title = await self.get_field_content(page, title_selectors, default="")
-            if not company: company = await self.get_field_content(page, company_selectors, default="")
-            if not loc: loc = await self.get_field_content(page, location_selectors, default="")
-            if not descr: descr = await self.get_field_content(page, description_selectors, default="")
-            posted_t = await self.get_field_content(page, posted_time_selectors, default=""); date_str = self.parse_posting_date(posted_t)
-            company_url = await self.get_field_content(page, company_url_selectors, default=""); company_size = await self.get_field_content(page, company_size_selectors, default="Unknown")
+
+            if not title:
+                title = await self.get_field_content(page, title_selectors, default="")
+            if not company:
+                company = await self.get_field_content(page, company_selectors, default="")
+            if not loc:
+                loc = await self.get_field_content(page, location_selectors, default="")
+            if not descr:
+                descr = await self.get_field_content(page, description_selectors, default="")
+
+            posted_t = await self.get_field_content(page, posted_time_selectors, default="")
+            date_str = self.parse_posting_date(posted_t)
+            company_url = await self.get_field_content(page, company_url_selectors, default="")
+            company_size = await self.get_field_content(page, company_size_selectors, default="Unknown")
             applicants_count = await self.fetch_applicants_count(page)
             remote_flag = any(r in descr.lower() for r in ["remote", "wfh", "work from home", "work-from-home"])
-            job_data = {"job_id": job_id, "title": title.strip(), "company": company.strip(),
-                        "company_url": company_url.strip(), "location": loc.strip(),
-                        "description": self.clean_html(descr.strip()), "company_size": company_size.strip(),
-                        "applicants_count": applicants_count, "remote_allowed": remote_flag, "job_url": jurl,
-                        "date": date_str, "listed_at": int(time.time() * 1000), "job_state": "ACTIVE"}
-            logger.info(f"Extracted details: {job_data['title']} @ {job_data['company']}"); return job_data
+
+            job_data = {
+                "job_id": job_id,
+                "title": title.strip(),
+                "company": company.strip(),
+                "company_url": company_url.strip(),
+                "location": loc.strip(),
+                "description": self.clean_html(descr.strip()),
+                "company_size": company_size.strip(),
+                "applicants_count": applicants_count,
+                "remote_allowed": remote_flag,
+                "job_url": jurl,
+                "date": date_str,
+                "listed_at": int(time.time() * 1000),
+                "job_state": "ACTIVE"
+            }
+            logger.info(f"Extracted details: {job_data['title']} @ {job_data['company']}")
+            return job_data
         except Exception as e:
-            logger.error(f"Failed for job {job_id}: {e}"); return None
+            logger.error(f"Failed for job {job_id}: {e}")
+            return None
+
 
     async def get_text_content(self, page: Any, selector: str, default: str = "") -> str:
         try:
@@ -249,15 +293,43 @@ class LinkedInScraper:
 
     async def update_existing_job(self, conn: Any, job_url: str, page: Any) -> Optional[Dict[str, Any]]:
         try:
-            logger.info(f"Updating job: {job_url}"); await page.goto(job_url, wait_until=self.wait_until, timeout=30000); await simulate_human_behavior(page)
-            applicants_count = await self.fetch_applicants_count(page)
-            not_accept = await page.query_selector("text=No longer accepting applications"); accepting = not not_accept
-            current_time = int(time.time() * 1000); status = "closed" if not accepting else "not applied"
-            conn.execute("UPDATE job_listings SET applicants_count = ?, last_checked = ?, application_status = ? WHERE job_url = ?", (applicants_count, current_time, status, job_url))
-            conn.commit(); logger.info(f"Updated {job_url}: count={applicants_count}, status={status}")
-            return {"job_url": job_url, "applicants_count": applicants_count, "application_status": status, "last_checked": current_time}
+            logger.info(f"Updating job: {job_url}")
+            await page.goto(job_url, wait_until=self.wait_until, timeout=30000)
+            await simulate_human_behavior(page)
+
+            # NEW: Check for "closed" application feedback on update
+            closed_app_text = self.scraper_config.get("applicants_update", {}).get("closed_application_text", "no longer accepting applications").lower()
+            feedback_elem = await page.query_selector(".artdeco-inline-feedback__message")
+            if feedback_elem:
+                feedback_text = (await feedback_elem.text_content() or "").strip().lower()
+                if closed_app_text in feedback_text:
+                    logger.info("Job is no longer accepting applications. Marking as CLOSED.")
+                    job_state = "CLOSED"
+                    applicants_count = 999
+                else:
+                    job_state = "ACTIVE"
+                    applicants_count = await self.fetch_applicants_count(page)
+            else:
+                job_state = "ACTIVE"
+                applicants_count = await self.fetch_applicants_count(page)
+
+            current_time = int(time.time() * 1000)
+            conn.execute(
+                "UPDATE job_listings SET applicants_count = ?, last_checked = ?, application_status = ?, job_state = ? WHERE job_url = ?",
+                (applicants_count, current_time, "closed" if job_state == "CLOSED" else "not applied", job_state, job_url)
+            )
+            conn.commit()
+            logger.info(f"Updated {job_url}: count={applicants_count}, state={job_state}")
+            return {
+                "job_url": job_url,
+                "applicants_count": applicants_count,
+                "job_state": job_state,
+                "last_checked": current_time
+            }
         except Exception as e:
-            logger.error(f"Error updating {job_url}: {e}"); return None
+            logger.error(f"Error updating {job_url}: {e}")
+            return None
+
 
 async def evaluate_job(ai_model: AIModel, job: Dict[str, Any]) -> Dict[str, Any]:
     evaluation: Dict[str, Any] = await ai_model.evaluate_job_fit(job); return {**job, **evaluation}

@@ -126,8 +126,6 @@ applicants_detail_selectors = [
 #      APPLICANTS UPDATE SETTINGS     #
 #######################################
 [applicants_update]
-
-# **CSS Selectors (for Playwright's `querySelector`)**
 selectors = [
     "span.jobs-unified-top-card__applicant-count",
     "span.job-card-container__applicant-count",
@@ -136,15 +134,10 @@ selectors = [
     "span.tvm__text.tvm__text--low-emphasis",
     "div.job-details-jobs-unified-top-card__primary-description-container span"
 ]
-
-# **XPath Selectors (for deeper elements)**
 xpaths = [
-#    "//span[normalize-space()='84 applicants']",
     "(//span[contains(text(), 'applicant')])[1]",
     "(//span[contains(., 'applicant')])[1]"
 ]
-
-# **Regex Patterns for Text Matching**
 patterns = [
     "(\\d+)\\s*(?:applicant|candidate|people|person)s?\\b",
     "(\\d+)\\s*people clicked apply",
@@ -152,6 +145,7 @@ patterns = [
     "Be among the first (\\d+) applicants",
     "(\\d+)\\s*clicked apply"
 ]
+closed_application_text = "no longer accepting applications"
 
 #######################################
 #        PAGINATION SETTINGS          #
