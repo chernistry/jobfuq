@@ -10,6 +10,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Route, 
 from playwright._impl._browser_type import BrowserType
 from faker import Faker
 from tenacity import retry, stop_after_attempt, wait_exponential
+from jobfuq.captcha_solver.solver import Funcap
 
 from jobfuq.logger import logger
 from jobfuq.utils import load_config
@@ -28,6 +29,54 @@ os.makedirs(SESSION_STORE_DIR, exist_ok=True)
 
 scraping_mode = main_config.get("scraping", {}).get("mode", "normal").lower()
 linked_config = load_config("jobfuq/conf/linked_config.toml")
+
+async def solve_captcha_if_arkose(page) -> bool:
+    """
+    Checks if there's an Arkose Labs FunCaptcha on the page,
+    attempts to solve it, and returns True if solved, False otherwise.
+    """
+
+    # EXAMPLE detection: look for iframe containing Arkose or "fc/gt2"
+    frames = page.frames
+    arkose_iframe = None
+    for frm in frames:
+        src = frm.url
+        if "arkoselabs" in src or "fc/gt2/public_key" in src:
+            arkose_iframe = frm
+            break
+
+    if not arkose_iframe:
+        # Not found, skip
+        return False
+
+    # If your site or LinkedIn uses a known site_key (must be discovered),
+    # or if you can parse it from the iframe URL, do so here:
+    # Example: parse sitekey= from something like:
+    #  https://client-api.arkoselabs.com/fc/gt2/public_key/<SITEKEY>?...
+    site_key = "029EF0D3-41DE-03E1-6971-466539B47725"  # <--- put correct site_key if known
+    host = "https://client-api.arkoselabs.com"        # Or the domain you're seeing in the iframe
+
+    # Use the page's real UA if you want:
+    user_agent = await page.evaluate("navigator.userAgent")
+
+    solver = Funcap(host=host, site_key=site_key, ua=user_agent, retries=5)
+    token = solver.solve()  # blocking call
+
+    if not token:
+        # Solve failed
+        return False
+
+    # In many Arkose contexts, you have to place the token in a hidden form
+    # or pass it as part of subsequent request. E.g.:
+    print("FunCaptcha solved successfully. Token =>", token)
+
+    # If the site expects your JavaScript to hold the token, inject it:
+    #  Example:
+    #     await page.evaluate(f"window.arkoseToken = '{token}'")
+    #
+    # Then possibly re-submit the form or reload:
+    #     await page.reload()
+    return True
 
 
 async def create_stealth_browser(browser_type: BrowserType) -> Any:
@@ -216,22 +265,23 @@ async def simulate_human_behavior(page: Any) -> None:
 
 async def handle_captcha(page: Any) -> None:
     """
-    Detect and neutralize CAPTCHAs if they appear.
+    Detect if there's a LinkedIn or other captcha. If it's an Arkose FunCaptcha, solve it.
     """
+    # If you have a known LinkedIn captcha element:
     captcha_selector = linked_config.get("captcha", {}).get("selector", "#captcha-challenge")
-    if await page.query_selector(captcha_selector):
-        await page.evaluate("""
-            () => {
-                document.querySelectorAll('iframe').forEach(iframe => {
-                    if (iframe.src.includes('captcha')) {
-                        iframe.style.display = 'none';
-                    }
-                });
-            }
-        """)
-        timeout_val = linked_config.get("captcha", {}).get("timeout_ms", 5000)
-        await page.wait_for_timeout(timeout_val)
-        await page.reload()
+    found_captcha = await page.query_selector(captcha_selector)
+    if found_captcha:
+        # Maybe it's a normal text captcha or recaptcha. Not Arkose.
+        # You can add other logic here.
+        return
+
+    # Next, check Arkose:
+    solved = await solve_captcha_if_arkose(page)
+    if solved:
+        logger.info("Arkose FunCaptcha was solved successfully!")
+    else:
+        logger.info("No FunCaptcha or not solved.")
+
 
 
 async def detect_blocks(page: Any) -> bool:
@@ -360,18 +410,17 @@ async def ensure_logged_in(page: Any, username: str, password: str) -> bool:
 
 
 def wait_for_feed(page: Any, timeout: int = 30000, interval: int = 1000) -> Any:
-    """
-    Return an async function that polls the URL for feed page presence.
-    """
     async def _wait() -> bool:
         waited = 0
         feed_indicator = linked_config.get("urls", {}).get("feed_url_indicator", "linkedin.com/feed")
         ssr_login_indicator = linked_config.get("urls", {}).get("ssr_login_indicator", "linkedin.com/ssr-login")
-
         while waited < timeout:
             current_url = page.url
             if feed_indicator in current_url:
                 return True
+            if "checkpoint/challenge" in current_url:
+                logger.info("Detected checkpoint challenge, attempting captcha solution...")
+                await handle_captcha(page)
             if ssr_login_indicator in current_url:
                 logger.info("Detected ssr-login page, waiting 5 seconds...")
                 await asyncio.sleep(5)
