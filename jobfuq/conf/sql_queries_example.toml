@@ -1,0 +1,141 @@
+[queries]
+# Create the blacklist table.
+create_blacklist_table = """
+CREATE TABLE IF NOT EXISTS blacklist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    reason TEXT,
+    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(type, value)
+)
+"""
+
+# Create the job_listings table.
+create_job_listings_table = """
+CREATE TABLE IF NOT EXISTS job_listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    company TEXT NOT NULL,
+    company_url TEXT NOT NULL,
+    location TEXT NOT NULL,
+    description TEXT NOT NULL,
+    remote_allowed BOOLEAN NOT NULL,
+    job_state TEXT NOT NULL,
+    company_size TEXT NOT NULL,
+    company_size_score INTEGER NOT NULL,
+    job_url TEXT UNIQUE NOT NULL,
+    date TEXT NOT NULL,
+    listed_at INTEGER NOT NULL,
+    applicants_count INTEGER,
+    skills_match REAL,
+    resume_similarity REAL,
+    final_fit_score REAL,
+    areas_for_development TEXT,
+    reasoning TEXT,
+    recency_score REAL,
+    applicant_score REAL,
+    final_score REAL,
+    overall_relevance REAL DEFAULT 0.0,
+    last_checked INTEGER,
+    last_reranked INTEGER,
+    last_relevance_check INTEGER,
+    is_posted INTEGER DEFAULT 1,
+    application_status TEXT DEFAULT 'not applied'
+)
+"""
+
+# Insert or replace a job into job_listings.
+insert_job = """
+INSERT OR REPLACE INTO job_listings (
+    title, company, company_url, location, description, remote_allowed, job_state,
+    company_size, company_size_score, job_url, date, listed_at, applicants_count,
+    overall_relevance, is_posted, application_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+# Check if a company is blacklisted.
+is_company_blacklisted = """
+SELECT COUNT(*) FROM blacklist
+WHERE type = 'blacklist'
+  AND (LOWER(?) LIKE '%' || LOWER(value) || '%' OR LOWER(?) LIKE '%' || LOWER(value) || '%')
+"""
+
+# Check if a job exists by its URL.
+job_exists = """
+SELECT COUNT(*) FROM job_listings WHERE job_url = ?
+"""
+
+# Load all blacklist records.
+load_blacklist = """
+SELECT type, value FROM blacklist
+"""
+
+# Retrieve jobs for scoring with blacklist filtering.
+get_jobs_for_scoring = """
+WITH RankedJobs AS (
+    SELECT id, company, title, description, application_status, date,
+           applicants_count, company_size_score, listed_at,
+           (
+               (CASE WHEN LOWER(title) LIKE '%topic1%' THEN 10 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic2%' THEN 9 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic3%' THEN 8 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic4%' THEN 7 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic5%' THEN 6 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic6%' THEN 5 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic7%' THEN 4 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic8%' THEN 3 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic9%' THEN 2 ELSE 0 END) +
+               (CASE WHEN LOWER(title) LIKE '%topic10%' THEN 1 ELSE 0 END)
+           ) AS priority_score,
+           (
+               SELECT COUNT(*)
+               FROM job_listings jl
+               WHERE is_posted = 1
+                 AND application_status LIKE 'not applied%'
+                 AND company IS NOT NULL
+                 AND final_score IS NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM blacklist bl
+                     WHERE bl.type = 'blacklist'
+                       AND LOWER(jl.title) LIKE '%' || LOWER(bl.value) || '%'
+                       AND NOT EXISTS (
+                           SELECT 1 FROM blacklist wl
+                           WHERE wl.type = 'whitelist'
+                             AND LOWER(jl.title) LIKE '%' || LOWER(wl.value) || '%'
+                       )
+                 )
+           ) AS total_jobs
+    FROM job_listings
+    WHERE is_posted = 1
+      AND application_status LIKE 'not applied%'
+      AND final_score IS NULL
+      AND company IS NOT NULL
+      AND description IS NOT NULL
+      AND TRIM(description) <> ''
+      AND description <> 'About the job'
+      AND NOT EXISTS (
+          SELECT 1 FROM blacklist bl
+          WHERE bl.type = 'blacklist'
+            AND LOWER(title) LIKE '%' || LOWER(bl.value) || '%'
+            AND NOT EXISTS (
+                SELECT 1 FROM blacklist wl
+                WHERE wl.type = 'whitelist'
+                  AND LOWER(title) LIKE '%' || LOWER(wl.value) || '%'
+            )
+      )
+)
+SELECT * FROM RankedJobs
+ORDER BY priority_score DESC
+LIMIT ?;
+"""
+
+# Update job scoring fields.
+update_job_scores = """
+UPDATE job_listings
+SET final_score = ?, skills_match = ?, resume_similarity = ?,
+    final_fit_score = ?, success_probability = ?, confidence = ?,
+    effort_days_to_fit = ?, critical_skill_mismatch_penalty = ?,
+    areas_for_development = ?, reasoning = ?
+WHERE id = ?;
+"""
