@@ -4,12 +4,18 @@ from typing import Optional, Dict, Any, List
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from rich.console import Console
 from jobfuq.logger import logger, set_verbose
-from jobfuq.linked_utils import ensure_logged_in, simulate_human_behavior, get_company_size, get_company_size_score, block_resources
+from jobfuq.linked_utils import (
+    ensure_logged_in,
+    simulate_human_behavior,
+    get_company_size,
+    get_company_size_score,
+    block_resources,
+    handle_manual_captcha
+)
 from jobfuq.utils import load_config
 from jobfuq.database import create_connection, create_table, create_blacklist_table, load_blacklist, insert_job, job_exists, is_company_blacklisted
 from jobfuq.processor import process_and_rank_jobs
 from jobfuq.llm_handler import AIModel
-from jobfuq.linked_utils import  wait_for_feed, handle_manual_captcha
 
 console = Console()
 
@@ -61,8 +67,9 @@ class LinkedInScraper:
             search_url += "&f_WT=1"
         logger.info(f"Navigating to: {search_url}")
         await page.goto(search_url, wait_until=self.wait_until)
-        # await handle_captcha(page)
-
+        # Handle captcha if encountered (will toggle headless if needed)
+        if "checkpoint/challenge" in page.url:
+            page = await handle_manual_captcha(page, playwright=page.context.browser._playwright)
         logger.info(f"Landed on: {page.url}")
         await simulate_human_behavior(page)
         for sel in self.scraper_config.get("jobs", {}).get("job_list_selectors", []):
@@ -253,9 +260,7 @@ class LinkedInScraper:
 
     async def get_job_details(self, page: Any, job_id: str, conn: Any = None, **kwargs) -> Optional[Dict[str, Any]]:
         """
-        Retrieves detailed job information. The `conn` parameter is optional;
-        if provided, DB updates (such as marking a job as closed) are performed.
-        Extra keyword arguments (like search_card_info) are accepted but ignored.
+        Retrieves detailed job information.
         """
         jurl = f"{self.base_url}/jobs/view/{job_id}/"
         logger.info(f"Job detail: {jurl}")
@@ -269,10 +274,9 @@ class LinkedInScraper:
             logger.error(f"Error for job {job_id}: {e}")
             return None
 
-        # Check if the job is no longer accepting applications
+        # Check if the job is closed
         closed_app_text = self.scraper_config.get("applicants_update", {}).get("closed_application_text", "no longer accepting applications").lower()
         feedback_elem = await page.query_selector(".artdeco-inline-feedback__message")
-
         if feedback_elem:
             feedback_text = (await feedback_elem.text_content() or "").strip().lower()
             if closed_app_text in feedback_text:
@@ -284,14 +288,17 @@ class LinkedInScraper:
                         (999, current_time, "closed", "CLOSED", jurl)
                     )
                     conn.commit()
-                return None  # Do not process further, but update DB if possible
+                return None
 
-        # If job is still open, proceed with normal extraction
+        # Extract details from the job page:
         title = await self.get_field_content(page, self.scraper_config.get("detail", {}).get("title_selectors", []), default="")
         company = await self.get_field_content(page, self.scraper_config.get("detail", {}).get("company_selectors", []), default="")
         loc = await self.get_field_content(page, self.scraper_config.get("detail", {}).get("location_selectors", []), default="")
         descr = await self.get_field_content(page, self.scraper_config.get("detail", {}).get("description_selectors", []), default="")
         applicants_count = await self.fetch_applicants_count(page)
+        # NEW: extract company size using detail selectors
+        company_size_selectors = self.scraper_config.get("detail", {}).get("company_size_selectors", [])
+        company_size = await self.get_field_content(page, company_size_selectors, default="Unknown")
 
         job_data = {
             "job_id": job_id,
@@ -303,6 +310,7 @@ class LinkedInScraper:
             "job_url": jurl,
             "job_state": "ACTIVE",
             "listed_at": int(time.time() * 1000),
+            "company_size": company_size,
         }
 
         logger.info(f"Extracted details: {job_data['title']} @ {job_data['company']}")
@@ -346,31 +354,24 @@ class LinkedInScraper:
             logger.info(f"Updating job: {job_url}")
             await page.goto(job_url, wait_until=self.wait_until, timeout=30000)
             await simulate_human_behavior(page)
-
-            # Check if job is closed
             closed_app_text = self.scraper_config.get("applicants_update", {}).get("closed_application_text", "no longer accepting applications").lower()
             feedback_elem = await page.query_selector(".artdeco-inline-feedback__message")
-
             if feedback_elem:
                 feedback_text = (await feedback_elem.text_content() or "").strip().lower()
                 if closed_app_text in feedback_text:
                     logger.info(f"Job {job_url} is closed. Marking in DB as CLOSED.")
-
                     current_time = int(time.time() * 1000)
                     conn.execute(
                         "UPDATE job_listings SET applicants_count = ?, last_checked = ?, application_status = ?, job_state = ? WHERE job_url = ?",
                         (999, current_time, "closed", "CLOSED", job_url)
                     )
                     conn.commit()
-
                     return {
                         "job_url": job_url,
                         "applicants_count": 999,
                         "job_state": "CLOSED",
                         "last_checked": current_time
                     }
-
-            # If still active, update the applicants count
             applicants_count = await self.fetch_applicants_count(page)
             current_time = int(time.time() * 1000)
             conn.execute(
@@ -378,7 +379,6 @@ class LinkedInScraper:
                 (applicants_count, current_time, "ACTIVE", job_url)
             )
             conn.commit()
-
             logger.info(f"Updated {job_url}: count={applicants_count}, state=ACTIVE")
             return {
                 "job_url": job_url,
@@ -386,7 +386,6 @@ class LinkedInScraper:
                 "job_state": "ACTIVE",
                 "last_checked": current_time
             }
-
         except Exception as e:
             logger.error(f"Error updating {job_url}: {e}")
             return None
@@ -408,11 +407,9 @@ async def run_scrape(config: Dict[str, Any], browser: Any, search_queries: List[
             pass
 
 async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: List[Dict[str, Any]], manual_login: bool, args: Optional[argparse.Namespace]) -> Any:
-    conn = create_connection(config)  # Подключаемся к БД
+    conn = create_connection(config)
     create_table(conn)
     create_blacklist_table(conn)
-
-
     try:
         blacklist = load_blacklist(conn)
     except Exception as e:
@@ -430,16 +427,14 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
         logger.info("Manual login selected. Navigating to LinkedIn login page. Please log in manually.")
         await page.goto("https://www.linkedin.com/login", wait_until="networkidle")
         await asyncio.to_thread(input, "Press Enter after you have logged in...")
-
         if not await wait_for_feed(page):
             logger.warning("Feed did not load. Checking if a captcha page is open...")
             if "checkpoint/challenge" in page.url:
-                await handle_manual_captcha(page)
+                page = await handle_manual_captcha(page, playwright=browser._playwright)
             else:
                 logger.error("Unknown issue: Login completed but feed did not load.")
                 return
         logger.info("Manual login complete.")
-
     else:
         creds_pool = config.get("linkedin_credentials", {}).values()
         if not creds_pool:
@@ -466,7 +461,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
             try:
                 split_url = debug_job_url.rstrip("/").split("/")
                 job_id = split_url[-1] or split_url[-2]
-                # In debug single-link mode, DB update isn’t necessary.
                 job_data = await scraper.get_job_details(detail_page, job_id)
             except Exception as e:
                 logger.error(f"Parse error: {e}")
@@ -497,7 +491,6 @@ async def get_jobcards(config: Dict[str, Any], browser: Any, search_queries: Lis
                     else:
                         logger.debug(f"Job {job_url} exists and recent; skipping.")
                     continue
-                # Pass the DB connection so that any DB updates in get_job_details are performed.
                 tasks.append(asyncio.create_task(fetch_job_detail_task(scraper, info, conn, page.context, blacklist, semaphore)))
             if tasks:
                 for detail in await asyncio.gather(*tasks, return_exceptions=True):
@@ -519,7 +512,6 @@ async def fetch_job_detail_task(scraper: LinkedInScraper, info: Dict[str, Any], 
         await page.route("**/*", block_resources)
         try:
             job_id = info["job_id"]
-            # Pass the connection along with extra keyword arguments.
             job_data = await scraper.get_job_details(page, job_id, conn, search_card_info=info)
             if not job_data:
                 return None
@@ -546,46 +538,36 @@ async def fetch_job_detail_task(scraper: LinkedInScraper, info: Dict[str, Any], 
 
 async def main_scraper(args: argparse.Namespace) -> None:
     config = load_config("jobfuq/conf/config.toml")
-
     if args.hours is not None:
         config["time_filter"] = f"r{args.hours * 3600}"
         logger.info(f"Time filter: {config['time_filter']}")
     else:
         config.setdefault("time_filter", "r604800")
-
     config["manual_login"] = args.manual_login
     squeries = config.get("search_queries", [{"keywords": "Master of Internet Surfing", "location": "Netherlands", "remote": None}])
     headless_mode = config.get("headless", False)
-
     logger.info(f"Launching browser with headless={headless_mode}")
     print_config_flags(config, args)
-
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless_mode, slow_mo=50)
-
-        # --- DEBUG MODE HANDLING ---
         if args.debug_single or config.get("debug", {}).get("enabled", False):
             logger.info("Debug mode enabled.")
             dbg = config.get("debug", {})
             conn = create_connection(config)
             create_table(conn)
             create_blacklist_table(conn)
-
             try:
                 blacklist = load_blacklist(conn)
             except Exception as e:
                 logger.error(f"Blacklist error: {e}")
                 blacklist = {"blacklist": set(), "whitelist": set()}
-
             context = await browser.new_context(
                 viewport={"width": 1280 + random.randint(-50, 50), "height": 720 + random.randint(-30, 30)},
                 user_agent=random.choice(config.get("user_agents", ["Mozilla/5.0"]))
             )
-
             page = await context.new_page()
             await page.route("**/*", block_resources)
             await simulate_human_behavior(page)
-
             if args.manual_login:
                 logger.info("Manual login for debug. Press Enter...")
                 input("Press Enter after login...")
@@ -602,12 +584,9 @@ async def main_scraper(args: argparse.Namespace) -> None:
                     logger.error("Auto-login failed. Aborting debug.")
                     return
                 logger.info("Logged in.")
-
             scraper = LinkedInScraper(config, config.get("time_filter", "r604800"), blacklist)
             mode = dbg.get("mode", "single_link")
-
             if mode == "single_link":
-                # Process provided job links
                 job_links = dbg.get("job_links", [])
                 if job_links:
                     for job_link in job_links:
@@ -621,13 +600,11 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         except Exception as e:
                             logger.error(f"Parse error: {e}")
                             continue
-
                         job_data = await scraper.get_job_details(page, job_id, conn)
                         if job_data:
                             logger.info("Debug extracted:\n" + json.dumps(job_data, indent=2))
                         else:
                             logger.error(f"Failed for {job_link}")
-
                 elif len(args.extra) > 0:
                     job_link = args.extra[0]
                     logger.info(f"Debug provided job link: {job_link}")
@@ -640,7 +617,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
                     except Exception as e:
                         logger.error(f"Parse error: {e}")
                         return
-
                     job_data = await scraper.get_job_details(page, job_id, conn)
                     if job_data:
                         logger.info("Debug extracted:\n" + json.dumps(job_data, indent=2))
@@ -648,13 +624,10 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         logger.error("Failed to extract job details.")
                 else:
                     logger.error("No job links provided for debug (single_link).")
-
             elif mode == "search_mode":
-                # Use search with a limit
                 query = squeries[0]
                 kw, loc, remote = query["keywords"], query["location"], query.get("remote", None)
                 logger.info(f"Debug search: kw={kw}, loc={loc}, remote={remote}")
-
                 job_infos = await scraper.search_jobs(page, kw, loc, remote)
                 for info in job_infos[: dbg.get("search_limit", 1)]:
                     job_data = await scraper.get_job_details(page, info["job_id"], conn, search_card_info=info)
@@ -662,20 +635,16 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         logger.info("Debug extracted:\n" + json.dumps(job_data, indent=2))
                     else:
                         logger.error(f"Failed for job id {info['job_id']}")
-
             elif mode == "rescrape_by_db_query":
                 sql_query = dbg.get("sql_query")
                 if not sql_query:
                     logger.error("No SQL query provided for rescrape_by_db_query. Aborting.")
                     return
-
                 cursor = conn.execute(sql_query)
                 rows = cursor.fetchall()
                 logger.info(f"Found {len(rows)} records to rescrape.")
-
                 concurrent_limit = dbg.get("concurrent_details", 15)
                 semaphore = asyncio.Semaphore(concurrent_limit)
-
                 async def rescrape_job(row):
                     async with semaphore:
                         job_url = row["job_url"] if isinstance(row, dict) else row[1]
@@ -688,7 +657,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         except Exception as e:
                             logger.error(f"Error parsing job_id from {job_url}: {e}")
                             return
-
                         logger.info(f"Rescraping job id {job_id} from {job_url}")
                         detail_page = await context.new_page()
                         await detail_page.route("**/*", block_resources)
@@ -700,28 +668,20 @@ async def main_scraper(args: argparse.Namespace) -> None:
                             conn.commit()
                         else:
                             logger.error(f"Failed to rescrape job id {job_id}")
-
                 tasks = [rescrape_job(row) for row in rows]
                 await asyncio.gather(*tasks)
-
             else:
                 logger.error("Unrecognized debug mode. Use 'single_link', 'search_mode', or 'rescrape_by_db_query'.")
-
             await context.close()
             conn.close()
             await browser.close()
             return
-
-        # --- NORMAL MODE ---
         recipe = args.recipe.split(",") if args.recipe else ["scrap", "process"]
         tasks = []
-
         if "scrap" in recipe:
             tasks.append(asyncio.create_task(run_scrape(config, browser, squeries, args.manual_login, endless=args.endless, args=args)))
-
         if "process" in recipe:
             tasks.append(asyncio.create_task(process_and_rank_jobs(config, args.verbose, config.get("threads", 4))))
-
         if tasks:
             if not args.endless:
                 await asyncio.gather(*tasks)
@@ -734,9 +694,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         logger.info("Task cancelled.")
             else:
                 await asyncio.gather(*tasks)
-
         await browser.close()
-
     logger.info("Scraping & processing complete. Browser closed.")
 
 if __name__ == "__main__":
