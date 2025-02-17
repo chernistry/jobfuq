@@ -7,6 +7,7 @@ import re
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
+import sqlite3  # Ensure sqlite3 is imported
 
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from rich.console import Console
@@ -376,17 +377,25 @@ class LinkedInScraper:
         applicants_count = await self.fetch_applicants_count(page)
         company_size = await self.get_field_content(page, company_size_selectors, default="Unknown")
 
+        # Added missing keys with default values for database insertion
         job_data = {
             "job_id": job_id,
             "title": title.strip(),
             "company": company.strip(),
+            "company_url": "",  # Default empty string since not extracted
             "location": loc.strip(),
             "description": self.clean_html(descr.strip()),
-            "applicants_count": applicants_count,
-            "job_url": jurl,
+            "remote_allowed": False,  # Default value
             "job_state": "ACTIVE",
-            "listed_at": int(time.time() * 1000),
             "company_size": company_size,
+            "company_size_score": 0,  # Will be updated later
+            "job_url": jurl,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "listed_at": int(time.time() * 1000),
+            "applicants_count": applicants_count,
+            "overall_relevance": 0.0,
+            "is_posted": 1,
+            "application_status": "not applied",
         }
         logger.info(f"Extracted details: {job_data['title']} @ {job_data['company']}")
         return job_data
