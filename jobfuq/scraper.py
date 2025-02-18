@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
 LinkedIn Scraper
+
+This script scrapes LinkedIn job listings with visual output using Rich,
+displaying configuration flags, progress messages, and debug information.
 """
 
 import sys
@@ -20,6 +23,9 @@ from playwright.async_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.columns import Columns
 
 from jobfuq.logger import logger, set_verbose
 from jobfuq.linked_utils import (
@@ -48,15 +54,16 @@ from jobfuq.processor import process_and_rank_jobs
 from jobfuq.llm_handler import AIModel
 
 
-
-# ==== INITIALIZATION & UTILITY FUNCTIONS ==== #
+# ==== GLOBAL CONSOLE INSTANCE ==== #
 
 console: Console = Console()
 
 
+# ==== CONFIGURATION FLAGS DISPLAY ==== #
+
 def print_config_flags(config: Dict[str, Any], args: argparse.Namespace) -> None:
     """
-    Print the configuration flags with visual indicators.
+    Print the configuration flags with visual indicators using a Rich Table and Panel.
 
     Args:
         config (Dict[str, Any]): The configuration dictionary.
@@ -69,14 +76,16 @@ def print_config_flags(config: Dict[str, Any], args: argparse.Namespace) -> None
         "Scraping Mode": config.get("scraping", {}).get("mode", "normal"),
         "Verbose": args.verbose or config.get("debug", {}).get("verbose", False),
     }
-    output: List[str] = []
+    table: Table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Configuration Flag", style="cyan", justify="left")
+    table.add_column("Value", style="green", justify="right")
+
     for key, value in flags.items():
         mark: str = "[green]✅[/green]" if value else "[red]❌[/red]"
-        output.append(f"{key}: {value} {mark}")
-    console.print("Configuration Flags:", style="bold cyan")
-    console.print("\n".join(output), style="bold yellow")
+        table.add_row(key, f"{value} {mark}")
 
-
+    panel: Panel = Panel(table, title="[bold blue]Configuration Flags[/bold blue]", border_style="bright_blue")
+    console.print(panel)
 
 
 # ==== CORE SCRAPER METHODS ==== #
@@ -691,7 +700,6 @@ class LinkedInScraper:
             return None
 
 
-
 # ==== SCRAPING WORKFLOW FUNCTIONS ==== #
 
 async def evaluate_job(
@@ -960,7 +968,6 @@ async def fetch_job_detail_task(
             await page.close()
 
 
-
 # ==== MAIN ENTRY POINT ==== #
 
 async def main_scraper(args: argparse.Namespace) -> None:
@@ -970,6 +977,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
     Args:
         args (argparse.Namespace): Command-line arguments.
     """
+    console.print("[bold blue]🚀 Starting LinkedIn Scraper[/bold blue]")
     config: Dict[str, Any] = load_config("jobfuq/conf/config.toml")
     if args.hours is not None:
         config["time_filter"] = f"r{args.hours * 3600}"
