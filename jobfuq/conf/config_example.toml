@@ -2,121 +2,121 @@
 #           GENERAL SETTINGS          #
 #######################################
 
-# Time filter for job postings (in seconds)
-# This defines how recent job postings should be considered.
+# Only job postings newer than this (in seconds) will be considered.
 time_filter = "604800"  # 7 days
 
-# Number of concurrent job details to process
-# Controls how many job detail pages are fetched in parallel.
+# Number of concurrent job detail pages to process.
 concurrent_details = 7
 
-# Maximum number of job postings to fetch per query
-# This prevents excessive data collection.
-max_postings = 100
+# Maximum number of job postings to fetch per query.
+max_postings = 1000
 
-# Delay before retrying failed extractions (in seconds)
+# Delay (in seconds) before retrying a failed extraction.
 retry_delay = 180  # 3 minutes
+
+# Run in headless mode.
+headless = true
+#manual_login = true
 
 #######################################
 #         DATABASE CONFIGURATION      #
 #######################################
 
-# Database path for storing job listings
-# Use a dummy or default path for now
+# Path to the SQLite database for storing job listings.
 db_path = "data/job_listings.db"
 
-# Path to store blacklisted companies/jobs
-# This file should store blacklisted entries in a json format
-blacklist_path = "data/blacklist.json"
-
 #######################################
-#         WEB SCRAPING SETTINGS       #
+#         SCRAPING SETTINGS           #
 #######################################
 
-# List of User-Agent headers for web scraping
-# These help simulate different browsers to avoid bot detection.
+[scraping]
+# Options: "aggressive", "normal", or "stealth"
+mode = "stealth"
+
+# List of User-Agent headers for web scraping.
 user_agents = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/537.36",
-  "Mozilla/5.0 (Android 14; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
-  "Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/537.36 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/537.36"
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ]
 
 #######################################
 #         JOB SEARCH QUERIES          #
 #######################################
 
-# List of search queries for job scraping
 [[search_queries]]
-keywords = "Example job title 1"
-location = "Dummy Location 1"
+keywords = "DevOps Engineer"
+location = "USA"
 f_WT = "1"  # 1 = On-Site, 2 = Remote, 3 = Hybrid
 
 [[search_queries]]
-keywords = "Example job title 2"
-location = "Dummy Location 2"
+keywords = "LLM Engineer"
+location = "Israel"
 f_WT = "1"
 
 [[search_queries]]
-keywords = "Example job title 3"
-location = "Dummy Location 3"
-f_WT = "1"
-
-[[search_queries]]
-keywords = "Example job title 4"
-location = "Dummy Location 4"
-f_WT = "1"
-
-[[search_queries]]
-keywords = "Example job title 5"
-location = "Dummy Location 5"
+keywords = "Penguin Flipper"
+location = "Canada"
 f_WT = "1"
 
 #######################################
 #      LINKEDIN CREDENTIALS (AUTH)    #
 #######################################
 
-# LinkedIn login credentials (use multiple accounts for load balancing)
-# Replace with dummy email and password (do not push real credentials)
 [linkedin_credentials]
 
 [linkedin_credentials."1"]
-username = "example1@email.com"
-password = "examplepassword123"
+username = "dummy1@example.com"
+password = "dummy_password_1"
 
 [linkedin_credentials."2"]
-username = "example2@email.com"
-password = "anotherpassword456"
+username = "dummy2@example.com"
+password = "dummy_password_2"
 
 #######################################
 #   AI PROVIDERS & API CONFIGURATION  #
 #######################################
 
-# Provider mode determines which AI models are used
-# Options: "together", "openrouter", "multi" (both)
+# Options: "together", "openrouter", or "multi"
 provider_mode = "together"
 
-# Number of concurrent AI evaluations (each with a unique API key if available)
+# Number of concurrent AI evaluations.
 threads = 4
 
-# Together AI provider settings
-together_api_key = "dummy_api_key_together"
-together_model = "deepseek-ai/DeepSeek-R1"
-together_rpm = 6  # API rate limit (requests per minute)
+# Together AI provider settings.
+together_api_key = "DUMMY_TOGEATHER_API_KEY"
+together_model = "dummy_model/together"
+together_rpm = 60  # Requests per minute
 
-# OpenRouter AI provider settings
+# OpenRouter AI provider settings.
 openrouter_api_keys = [
-  "dummy_api_key_openrouter"
+  "DUMMY_OPENROUTER_API_KEY_1",
+  "DUMMY_OPENROUTER_API_KEY_2"
 ]
-openrouter_model = "deepseek/deepseek-r1:free"
+openrouter_model = "dummy_model/openrouter"
 
 #######################################
 #      AI PROMPT CONFIGURATION        #
 #######################################
 
-# AI prompt template for career advisor evaluation
-# This file contains the prompt structure that guides AI evaluations.
-prompt = "prompts/example_prompt_file.txt"
+# Path to the prompt template used for AI evaluations.
+prompt = "prompts/deepseek_r1_career_advisor_template.txt"
+
+#######################################
+#         DEBUG CONFIGURATION         #
+#######################################
+
+[debug]
+enabled = false
+mode = "single_link"  # Options: "single_link", "search_mode", "rescrape_by_db_query"
+sql_query = '''SELECT * FROM main.job_listings'''
+search_limit = 3
+job_links = [
+  "https://www.linkedin.com/jobs/view/1234567890/",
+  "https://www.linkedin.com/jobs/view/2345678901/"
+]
+save_to_db = true
+timeouts = { aggressive = 2000, normal = 5000, stealth = 8000 }
+log_selectors = true
+force_expand = true
+verbose = true
