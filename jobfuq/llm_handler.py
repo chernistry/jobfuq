@@ -120,7 +120,7 @@ class AIModel:
     def create_error_response(self, error_message: str) -> Dict[str, Any]:
         return {
             'skills_match': 0.0,
-            'experience_gap': 0.0,
+            'experience_gap': 15.0,
             'model_fit_score': 0.0,
             'reasoning': error_message,
             'areas_for_development': 'Error during evaluation',
@@ -161,20 +161,21 @@ class AIModel:
                     continue
         if not data:
             logger.warning('No JSON found in response after removing <think> tags.')
-        # If the model outputs values in the 0–1 range, scale them to 0–100.
-        def scale_if_needed(x):
-            val = safe_float(x)
+        # Only expect our new keys. For each, if the value is between 0 and 2 (and nonzero), assume it is on a 0-1 scale and multiply by 100.
+        def scale_if_needed(x, default):
+            val = safe_float(x) if x is not None else default
             if 0 < val < 2:
                 return val * 100
             return val
+
         result = {
-            'skills_match': scale_if_needed(data.get('skills_match', data.get('resume_similarity', 0.0))),
-            'experience_gap': scale_if_needed(data.get('experience_gap', 0.0)),
-            'model_fit_score': scale_if_needed(data.get('model_fit_score', data.get('final_fit_score', 0.0))),
-            'success_probability': scale_if_needed(data.get('success_probability', 50.0)),
-            'role_complexity': scale_if_needed(data.get('role_complexity', data.get('confidence', 50.0))),
+            'skills_match': scale_if_needed(data.get('skills_match'), 0.0),
+            'experience_gap': scale_if_needed(data.get('experience_gap'), 15.0),  # Default to 15 if missing.
+            'model_fit_score': scale_if_needed(data.get('model_fit_score'), 0.0),
+            'success_probability': scale_if_needed(data.get('success_probability'), 50.0),
+            'role_complexity': scale_if_needed(data.get('role_complexity'), 50.0),
             'effort_days_to_fit': safe_float(data.get('effort_days_to_fit', 7.0)),
-            'critical_skill_mismatch_penalty': scale_if_needed(data.get('critical_skill_mismatch_penalty', 0.0)),
+            'critical_skill_mismatch_penalty': scale_if_needed(data.get('critical_skill_mismatch_penalty'), 0.0),
             'areas_for_development': str(data.get('areas_for_development', '')).strip(),
             'reasoning': str(data.get('reasoning', '')).strip()
         }
