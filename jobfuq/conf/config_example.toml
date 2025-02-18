@@ -90,10 +90,37 @@ threads = 4
 
 # Together AI provider settings.
 together_api_key = "DUMMY_TOGEATHER_API_KEY"
+
+
+
+# ============================================================================ #
+#                           TOGETHER AI PROVIDER SETTINGS                     #
+# ============================================================================ #
+# Defines the AI model to be used.
+# Recommended models:
+# - `deepseek-ai/DeepSeek-R1`: High accuracy, but slower.
+# - `meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo`: Balanced speed and intelligence.
+# Refer to the docs for further model recommendations.
+
 together_model = "dummy_model/together"
 together_rpm = 60      # Requests per minute
 
-# OpenRouter AI provider settings.
+# ============================================================================ #
+#                           OPENROUTER AI PROVIDER SETTINGS                    #
+# ============================================================================ #
+
+# OpenRouter provides multiple free-tier AI models, making it an excellent
+# option for experimentation and cost-effective development.
+# For an up-to-date list of free models, check:
+# https://openrouter.ai/models?max_price=0&order=top-weekly
+#
+# Recommended models:
+# - `deepseek/deepseek-r1:free`: High accuracy but slower.
+# - `meta-llama/llama-3.3-70b-instruct:free`: Faster but lower accuracy
+#   compared to Together 450B.
+#
+# Choose based on your requirements for speed vs. precision.
+
 openrouter_api_keys = [
   "DUMMY_OPENROUTER_API_KEY_1",
   "DUMMY_OPENROUTER_API_KEY_2"
