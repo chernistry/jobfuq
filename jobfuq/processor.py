@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""
-Process & rank jobs with concurrency, skipping 0.0 extractions & retrying later.
-
-This module defines the main job ranking pipeline, orchestrating:
-  - Database retrieval of unscored jobs
-  - Concurrent AI evaluation (via AIModel)
-  - Final scoring & database updates
-  - Automatic retries for extraction failures
-"""
-
 import asyncio
 import argparse
 import math
 import sys
 import time
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any, Dict
 
 from rich.console import Console
 from rich.table import Table
@@ -24,306 +14,183 @@ from rich.panel import Panel
 from .utils import load_config
 from .llm_handler import AIModel, evaluate_job, ProviderManager
 from .database import (
-    create_connection, get_jobs_for_scoring, update_job_scores, add_fit_score_columns
+    create_connection,
+    get_jobs_for_scoring,
+    update_job_scores,
+
 )
 from .logger import logger, set_verbose
 
 console = Console()
+retry_map = {}
 
-# Load configuration
-config = load_config("jobfuq/conf/config.toml")
-
-# Global in-memory map tracking jobs with extraction failures (job_id -> next eligible timestamp)
-retry_map: Dict[int, float] = {}
-
-
-def calculate_recency_score(job_date: str, max_days: int = 60) -> float:
+def calculate_recency_score(job_date, max_days=60):
     try:
-        days_diff = (datetime.now() - datetime.strptime(job_date, '%Y-%m-%d')).days
-        if days_diff > max_days:
-            return 0.0
-        return 1.0 / (math.log(days_diff + 1) + 0.5)
-    except Exception as e:
-        logger.error(f"Error calculating recency score: {e}")
+        d = (datetime.now() - datetime.strptime(job_date, '%Y-%m-%d')).days
+        if d < 0: d = 0
+        if d > max_days: return 0.0
+        return max(0.0, min(100.0, 100.0 * (1.0 - d/float(max_days))))
+    except:
         return 0.0
 
-
-def calculate_company_size_score(size_score: int) -> float:
+def calculate_company_size_score(sz):
     try:
-        if 3 <= size_score <= 5:
-            return 1.0
-        elif size_score == 6:
-            return 0.9
-        elif size_score == 7:
-            return 0.7
-        elif size_score >= 8:
-            return 0.5
-        return max(0.6 + (size_score * 0.1), 0.0)
-    except Exception:
+        if 3 <= sz <= 5: return 100.0
+        if sz == 6: return 80.0
+        if sz == 7: return 60.0
+        if sz >= 8: return 40.0
+        return max(0.0, 50.0 - (sz*5))
+    except:
         return 0.0
 
+def softened_competition_penalty(cnt):
+    try:
+        c = min(cnt, 500)
+        return max(0.0, 100.0 - (c*0.2))
+    except:
+        return 50.0
 
-def softened_competition_penalty(applicant_count: int) -> float:
-    base = 1.0 / (math.log(applicant_count + 3) + 1)
-    return 0.7 + 0.3 * base
+def calculate_preliminary_score(e: Dict[str, float], rec: float, applicants: int, csize: float) -> float:
+    sm = e.get('skills_match', 0.0)
+    xp_gap = e.get('experience_gap', 0.0)
+    mod_fit = e.get('model_fit_score', 0.0)
+    sp = e.get('success_probability', 50.0)
+    cpen = e.get('critical_skill_mismatch_penalty', 0.0)
+    p = min(80.0, xp_gap + cpen)
+    base = sm - p
+    if base < 1.0: base = 1.0
+    f = base * (sp/100.0)
+    comp = softened_competition_penalty(applicants)/100.0
+    f *= comp
+    ra = (rec - 50.0)*0.2
+    ca = (csize - 50.0)*0.1
+    f += ra + ca
+    return max(0.0, min(f, 100.0))
 
-
-def calculate_final_score(
-        evaluation: Dict[str, Any],
-        recency_score: float,
-        applicant_count: int,
-        company_size_score: float
-) -> float:
-    skills_match = evaluation.get('skills_match', 0.0)
-    resume_similarity = evaluation.get('resume_similarity', 0.0)
-    success_probability = evaluation.get('success_probability', 0.8)
-    confidence = evaluation.get('confidence', 0.8)
-    effort_days_to_fit = evaluation.get('effort_days_to_fit', 4.0)
-    critical_penalty = max(evaluation.get('critical_skill_mismatch_penalty', 0.0), 0.0)
-
-    initial_fit = (skills_match * 0.6) + (resume_similarity * 0.4)
-    base = initial_fit * success_probability * confidence
-
-    penalty_factor = 0.2 * (1.0 - 0.5 * success_probability)
-    if penalty_factor < 0.05:
-        penalty_factor = 0.05
-    base -= (critical_penalty * penalty_factor)
-
-    upskill_mult = max(0.90, 1.0 - math.log(effort_days_to_fit + 1) * 0.03)
-    base *= upskill_mult
-
-    conf_adjust = 1.0 - ((1.0 - confidence) ** 2 * 0.1)
-    base *= conf_adjust
-
-    comp_factor = softened_competition_penalty(applicant_count) * (1.0 + success_probability * 0.2)
-    base *= comp_factor
-
-    rec_adj = (recency_score - 0.5) * 0.1
-    csize_adj = (company_size_score - 0.5) * 0.1
-    base += (rec_adj + csize_adj)
-
-    scaled = base * 1.3
-    if scaled <= 0.7:
-        final = scaled
-    else:
-        extra = scaled - 0.7
-        damped_extra = 0.3 * (1 - math.exp(-extra * 3))
-        final = 0.7 + damped_extra
-
-    ease_factor = 1.0 + ((30 - effort_days_to_fit) / 300)
-    final *= ease_factor
-    return max(min(final, 1.0), 0.01)
-
-
-async def evaluate_and_update_job(
-        job: Dict[str, Any],
-        ai_model: AIModel,
-        conn,
-        verbose: bool
-) -> None:
+async def evaluate_and_update_job(job: Dict[str, Any], model: AIModel, conn, verbose: bool):
     try:
         recency = calculate_recency_score(job['date'])
-        applicant_count = job.get('applicants_count') or 0
-
-        evaluation = await evaluate_job(ai_model, job)
-        if not evaluation:
-            logger.warning(f"No evaluation returned for job {job['id']}. Skipping.")
-            retry_map[job['id']] = time.time() + 180
+        app_count = job.get('applicants_count') or 0
+        ev = await evaluate_job(model, job)
+        if not ev:
+            logger.warning(f"No eval for job {job['id']}")
+            retry_map[job['id']] = time.time()+180
             return
-
-        sm = evaluation.get('skills_match', 0.0)
-        rs = evaluation.get('resume_similarity', 0.0)
-        ffs = evaluation.get('final_fit_score', 0.0)
-        reasoning = evaluation.get('reasoning', '').strip()
-        dev_areas = evaluation.get('areas_for_development', '').strip()
-
-        logger.debug(f"Job {job['id']} Eval: skills_match={sm}, resume_similarity={rs}, final_fit_score={ffs}")
-        logger.debug(f"Job {job['id']} Reasoning: {reasoning}")
-        logger.debug(f"Job {job['id']} Dev Areas: {dev_areas}")
-
-        if (sm == 0.0 and rs == 0.0 and ffs == 0.0):
-            if not reasoning or "extraction failed" in reasoning.lower() or "error during evaluation" in dev_areas.lower():
-                logger.warning(f"Job {job['id']}: zero numeric & no valid reasoning => retry in 3 min.")
-                retry_map[job['id']] = time.time() + 180
-                return
-
-        company_size_val = calculate_company_size_score(job.get('company_size_score', 0))
-        final_score = calculate_final_score(evaluation, recency, applicant_count, company_size_val)
-        ranked_job = {**job, **evaluation, 'final_score': final_score}
-        update_job_scores(conn, job['id'], ranked_job)
-        logger.info(f"Job {job['id']} updated with final score: {final_score:.2f}")
-
+        sm = ev.get('skills_match', 0.0)
+        mf = ev.get('model_fit_score', 0.0)
+        reasoning = ev.get('reasoning','')
+        if sm==0 and mf==0 and not reasoning:
+            logger.warning(f"Job {job['id']} -> suspicious zero extraction")
+            retry_map[job['id']] = time.time()+180
+            return
+        final_score = calculate_preliminary_score(ev, recency, app_count, calculate_company_size_score(job.get('company_size_score',0)))
+        updated = {**job, **ev, 'preliminary_score': final_score}
+        update_job_scores(conn, job['id'], updated)
+        logger.info(f"Job {job['id']} => preliminary_score={final_score:.2f}")
         if verbose:
-            table = Table(title=f"Evaluation: {ranked_job['title']} @ {ranked_job['company']}")
-            table.add_column("Metric", style="bold")
-            table.add_column("Value", style="cyan")
-            metrics = {
-                "📍Overall Score": ranked_job.get('final_score', 0.0),
-                "Success Probability": ranked_job.get('success_probability', 0.8),
-                "Confidence": ranked_job.get('confidence', 0.8),
-                "Fit Score": ranked_job.get('final_fit_score', 0.0),
-                "Skills Match": ranked_job.get('skills_match', 0.0),
-                "Resume Similarity": ranked_job.get('resume_similarity', 0.0),
-                "Effort Days to Fit": ranked_job.get('effort_days_to_fit', 4),
+            t = Table(title=f"Job {job['id']}")
+            t.add_column("Metric")
+            t.add_column("Value")
+            items = {
+                "Preliminary Score": final_score,
+                "Skills Match": sm,
+                "Model Fit Score": mf,
+                "Success Probability": ev.get('success_probability',50.0),
+                "Experience Gap": ev.get('experience_gap',0.0),
+                "Critical Penalty": ev.get('critical_skill_mismatch_penalty',0.0),
+                "role_complexity": ev.get('role_complexity',0.0),
             }
-            for key, val in metrics.items():
-                table.add_row(key, f"{val:.2f}" if val is not None else "N/A")
-
-            if 'query_token_count' in evaluation and 'response_token_count' in evaluation:
-                table.add_row("Query Tokens", str(evaluation['query_token_count']))
-                table.add_row("Response Tokens", str(evaluation['response_token_count']))
-
-            table.add_row("Recency Score", f"{recency:.2f}")
-            table.add_row("Company Size Score", f"{company_size_val:.2f}")
-            table.add_row("Applicant Competition", f"{applicant_count}")
-
-            panel = Panel(table, title="Detailed Evaluation", expand=False)
-            console.print(panel)
-
+            for k,v in items.items():
+                t.add_row(k, f"{v:.1f}")
+            t.add_row("Recency Score", f"{recency:.1f}")
+            t.add_row("Applicants", str(app_count))
+            p = Panel(t)
+            console.print(p)
+            console.print(f"[bold]Reasoning:[/bold] {ev.get('reasoning','')}\n[bold]Areas:[/bold] {ev.get('areas_for_development','')}")
     except Exception as ex:
-        logger.error(f"Error updating job {job.get('id', 0)}: {ex}")
+        logger.error(f"Err job {job.get('id')}: {ex}")
         if job['id'] not in retry_map:
-            retry_map[job['id']] = time.time() + 180
+            retry_map[job['id']] = time.time()+180
 
-
-async def process_and_rank_jobs(
-        config: Dict[str, Any],
-        verbose: bool,
-        threads: int
-) -> None:
-    conn = create_connection(config)
-    add_fit_score_columns(conn)
-
-    provider_manager = ProviderManager(config)
-    # Force default provider_mode to "together" if not set.
-    provider_mode = (config.get("ai_providers", {}).get("provider_mode", "together")).lower()
-    logger.debug(f"Provider mode from config: {provider_mode}")
-
-    if provider_mode == "together":
-        # Use .strip() in case there are any extraneous spaces.
-        together_key = config.get("ai_providers", {}).get("together_api_key", "").strip()
-        keys = [together_key] if together_key else []
-    elif provider_mode == "openrouter":
-        keys = config.get("ai_providers", {}).get("openrouter_api_keys", [])
-    elif provider_mode == "multi":
+async def process_and_rank_jobs(conf, verbose, threads):
+    conn = create_connection(conf)
+    # add_fit_score_columns(conn)
+    pm = ProviderManager(conf)
+    mode = conf.get('ai_providers',{}).get('provider_mode','together')
+    if mode=='together':
+        k = conf.get('ai_providers',{}).get('together_api_key','').strip()
+        keys = [k] if k else []
+    elif mode=='openrouter':
+        keys = conf.get('ai_providers',{}).get('openrouter_api_keys',[])
+    elif mode=='multi':
         keys = []
-        openrouter_keys = config.get("ai_providers", {}).get("openrouter_api_keys", [])
-        keys.extend(openrouter_keys)
-        together_key = config.get("ai_providers", {}).get("together_api_key", "").strip()
-        if together_key:
-            keys.append(together_key)
+        open_k = conf.get('ai_providers',{}).get('openrouter_api_keys',[])
+        keys.extend(open_k)
+        tk = conf.get('ai_providers',{}).get('together_api_key','').strip()
+        if tk: keys.append(tk)
     else:
         keys = []
-    #
-    # logger.debug(f"API keys found: {keys}")
     if not keys:
-        logger.error(f"No API keys found for provider mode '{provider_mode}'. Exiting.")
+        logger.error("No AI keys found.")
         sys.exit(1)
-
-    models = []
+    models=[]
     for i in range(threads):
-        sub_config = dict(config)
-        if provider_mode == "together":
-            sub_config["ai_providers"]["together_api_key"] = keys[i % len(keys)]
-        elif provider_mode == "openrouter":
-            sub_config["ai_providers"]["openrouter_api_keys"] = [keys[i % len(keys)]]
-        elif provider_mode == "multi":
-            sub_config["ai_providers"]["openrouter_api_keys"] = [keys[i % len(keys)]]
-            sub_config["ai_providers"]["together_api_key"] = keys[i % len(keys)]
-        model = AIModel(sub_config, provider_manager)
-        models.append(model)
-
+        sc = dict(conf)
+        if mode=='together':
+            sc['ai_providers']['together_api_key'] = keys[i%len(keys)]
+        elif mode=='openrouter':
+            sc['ai_providers']['openrouter_api_keys'] = [keys[i%len(keys)]]
+        elif mode=='multi':
+            sc['ai_providers']['openrouter_api_keys'] = [keys[i%len(keys)]]
+            sc['ai_providers']['together_api_key'] = keys[i%len(keys)]
+        m = AIModel(sc, pm)
+        models.append(m)
     while True:
         try:
-            raw_jobs = get_jobs_for_scoring(conn, limit=threads)
-            jobs: List[Dict[str, Any]] = []
-            now_ts = time.time()
-            for j in raw_jobs:
+            raw = get_jobs_for_scoring(conn, limit=threads)
+            now = time.time()
+            jobs=[]
+            for j in raw:
                 if j['id'] in retry_map:
-                    if now_ts < retry_map[j['id']]:
-                        logger.debug(f"Skipping job {j['id']} until {retry_map[j['id']]:.1f}")
+                    if now<retry_map[j['id']]:
                         continue
                     else:
                         del retry_map[j['id']]
                 jobs.append(j)
-
-            logger.info(f"Retrieved {len(jobs)} jobs for scoring after retry filter")
-
+            logger.info(f"{len(jobs)} jobs for scoring")
             if not jobs:
-                console.print("[yellow]No new jobs found for scoring. Waiting for 30 sec...")
+                console.print("[yellow]No new jobs. Sleep 30s")
                 await asyncio.sleep(30)
                 continue
-
-            tasks = []
-            for i, job in enumerate(jobs):
-                ai_model = models[i % threads]
-                tasks.append(evaluate_and_update_job(job, ai_model, conn, verbose))
-
+            tasks=[]
+            for i,jb in enumerate(jobs):
+                tasks.append(evaluate_and_update_job(jb, models[i%threads], conn, verbose))
             await asyncio.gather(*tasks)
             await asyncio.sleep(1)
-
         except Exception as e:
-            logger.error(f"Error in main processing loop: {e}")
+            logger.error(f"Main loop: {e}")
             await asyncio.sleep(5)
 
-
-async def main(
-        config_path: str,
-        verbose: bool,
-        endless: bool,
-        threads: int
-) -> None:
-    console.print("[bold blue]Starting job processing and ranking with concurrency (skip+retry on extraction fails)")
+async def main(config_path, verbose, endless, threads):
+    console.print("[bold blue]Starting Processor")
     try:
-        config = load_config(config_path)
-        # print("DEBUG => FULL CONFIG:\n", config)
-        # print("DEBUG => together_api_key =", repr(config.get("together_api_key")))
-
+        c = load_config(config_path)
         set_verbose(verbose)
-
         if not endless:
-            await process_and_rank_jobs(config, verbose, threads)
+            await process_and_rank_jobs(c, verbose, threads)
         else:
             while True:
-                await process_and_rank_jobs(config, verbose, threads)
-                logger.info("Waiting 60 sec before next pass in endless mode.")
+                await process_and_rank_jobs(c, verbose, threads)
+                logger.info("Looping again in 60s.")
                 await asyncio.sleep(60)
-    except Exception as e:
-        logger.error(f"Fatal error in main: {e}")
+    except:
         sys.exit(1)
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Process & rank jobs with concurrency, skipping 0.0 extractions & retrying later"
-    )
-    parser.add_argument(
-        "config",
-        nargs="?",
-        default="jobfuq/conf/config.toml",
-        help="Path to config file"
-    )
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Increase output verbosity"
-    )
-    parser.add_argument(
-        "--endless",
-        action="store_true",
-        help="Run in endless mode (loop forever)"
-    )
-    parser.add_argument(
-        "--threads",
-        type=int,
-        default=1,
-        help="Number of concurrent evaluations (each with unique API key)"
-    )
-    args = parser.parse_args()
-
-    asyncio.run(main(
-        config_path=args.config,
-        verbose=args.verbose,
-        endless=args.endless,
-        threads=args.threads
-    ))
+if __name__=='__main__':
+    p=argparse.ArgumentParser()
+    p.add_argument('config',nargs='?',default='jobfuq/conf/config.toml')
+    p.add_argument('-v','--verbose',action='store_true')
+    p.add_argument('--endless',action='store_true')
+    p.add_argument('--threads',type=int,default=1)
+    a=p.parse_args()
+    asyncio.run(main(a.config,a.verbose,a.endless,a.threads))

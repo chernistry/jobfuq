@@ -1,8 +1,6 @@
 CREATE TABLE IF NOT EXISTS blacklist (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    type TEXT NOT NULL,
-    value TEXT NOT NULL,
-    reason TEXT,
-    date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(type, value)
+                                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                         type TEXT NOT NULL,
+                                         value TEXT NOT NULL,
+                                         UNIQUE(type, value)
 )

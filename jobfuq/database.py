@@ -1,218 +1,140 @@
-"""
-Database Module
-
-This module contains functions for creating and managing the SQLite database used for job listings.
-It supports operations such as creating tables (job_listings, blacklist, and blacklisted_companies),
-inserting/updating job records, loading blacklist data, and querying jobs for processing while filtering out blacklisted titles.
-
-SQL queries are stored as individual .sql files in the "sql" folder.
-"""
-
 import os
 import sqlite3
 import time
-import re
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List
 
 from jobfuq.logger import logger
 
-# Global cache for SQL queries.
-SQL_QUERIES: Dict[str, str] = {}
+SQL_QUERIES = {}
 
-def load_sql_queries() -> Dict[str, str]:
-    """
-    Load SQL query strings from separate .sql files located in the 'sql' folder.
-    Each file's name (without the .sql extension) is used as the key.
-    """
+def load_sql_queries():
     global SQL_QUERIES
     if SQL_QUERIES:
         return SQL_QUERIES
-
-    sql_dir = os.path.join(os.path.dirname(__file__), "sql")
+    sql_dir = os.path.join(os.path.dirname(__file__), 'sql')
     if not os.path.isdir(sql_dir):
-        raise FileNotFoundError(f"SQL directory not found: {sql_dir}")
-
+        raise FileNotFoundError(sql_dir)
     for filename in os.listdir(sql_dir):
-        if filename.endswith(".sql"):
-            key = os.path.splitext(filename)[0]  # filename without extension
-            file_path = os.path.join(sql_dir, filename)
-            with open(file_path, "r", encoding="utf-8") as f:
+        if filename.endswith('.sql'):
+            key = os.path.splitext(filename)[0]
+            path = os.path.join(sql_dir, filename)
+            with open(path, 'r', encoding='utf-8') as f:
                 SQL_QUERIES[key] = f.read().strip()
-
     return SQL_QUERIES
 
-def add_fit_score_columns(conn: sqlite3.Connection) -> None:
-    """
-    Add scoring-related columns to the job_listings table if they don't already exist.
-    """
-    columns: List[Tuple[str, str, Any]] = [
-        ('skills_match', 'REAL', 0.0),
-        ('resume_similarity', 'REAL', 0.0),
-        ('final_fit_score', 'REAL', 0.0),
-        ('final_score', 'REAL', 0.0),
-        ('success_probability', 'REAL', 0.6),
-        ('confidence', 'REAL', 0.7),
-        ('effort_days_to_fit', 'INTEGER', 14),
-        ('critical_skill_mismatch_penalty', 'REAL', 0.0),
-        ('last_checked', 'INTEGER', None),
-        ('last_reranked', 'INTEGER', None),
-        ('areas_for_development', 'TEXT', None),
-        ('reasoning', 'TEXT', None)
-    ]
-    for col, col_type, _ in columns:
-        try:
-            conn.execute(f'ALTER TABLE job_listings ADD COLUMN {col} {col_type}')
-        except sqlite3.OperationalError:
-            # Column already exists; ignore error.
-            pass
-    conn.commit()
-
-def create_blacklist_table(conn: sqlite3.Connection) -> None:
-    """
-    Create the blacklist table if it does not exist.
-    This table stores keyword-based blacklist and whitelist entries.
-    """
-    create_table_sql = """
-    CREATE TABLE IF NOT EXISTS blacklist (
-        id INTEGER PRIMARY KEY,
-        value TEXT NOT NULL,
-        type TEXT NOT NULL
-    );
-    """
-    conn.execute(create_table_sql)
-    conn.commit()
-    logger.info("Created or verified blacklist table.")
-
-def create_blacklisted_companies_table(conn: sqlite3.Connection) -> None:
-    """
-    Create the blacklisted_companies table if it does not exist.
-    This table stores company names that are blacklisted.
-    """
-    create_table_sql = """
-    CREATE TABLE IF NOT EXISTS blacklisted_companies (
-         id INTEGER PRIMARY KEY AUTOINCREMENT,
-         company TEXT NOT NULL UNIQUE
-    );
-    """
-    conn.execute(create_table_sql)
-    conn.commit()
-    logger.info("Created or verified blacklisted_companies table.")
-
-def create_connection(config: Dict[str, Any]) -> sqlite3.Connection:
-    """
-    Create and return a SQLite database connection using the path specified in the configuration.
-    """
-    db_path: str = config.get('db_path', "data/test_job_listings.db")
-    db_dir: str = os.path.dirname(db_path)
-    if not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
+def create_connection(config):
+    db_path = config.get('db_path', 'data/test_job_listings.db')
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
     return sqlite3.connect(db_path)
 
-def create_table(conn: sqlite3.Connection) -> None:
-    """
-    Create the job_listings table if it does not exist.
-    """
-    queries = load_sql_queries()
-    conn.execute(queries["create_job_listings_table"])
+def create_table(conn):
+    q = load_sql_queries()['create_job_listings_table']
+    conn.execute(q)
     conn.commit()
 
-def insert_job(conn: sqlite3.Connection, job: Dict[str, Any]) -> None:
-    """
-    Insert a new job or update an existing job record in the job_listings table.
-    """
-    queries = load_sql_queries()
+def create_blacklist_table(conn):
+    q = load_sql_queries()['create_blacklist_table']
+    conn.execute(q)
+    conn.commit()
+    logger.info('Blacklist table verified.')
+
+def create_blacklisted_companies_table(conn):
+    q = load_sql_queries()['create_blacklisted_companies_table']
+    conn.execute(q)
+    conn.commit()
+    logger.info('Blacklisted companies table verified.')
+
+def load_blacklist(conn):
+    q = load_sql_queries()['load_blacklist']
+    c = conn.execute(q)
+    r = {'blacklist': set(), 'whitelist': set()}
+    for row in c.fetchall():
+        t = row[0].strip().lower()
+        v = row[1].strip()
+        if t in r:
+            r[t].add(v)
+        else:
+            r['blacklist'].add(v)
+    return r
+
+def is_company_blacklisted(conn, company_name, company_url):
     try:
-        conn.execute(queries["insert_job"], (
-            job['title'], job['company'], job['company_url'], job['location'], job['description'],
-            job['remote_allowed'], job['job_state'], job.get('company_size', 'Unknown'),
-            job.get('company_size_score', 0), job['job_url'], job['date'], job['listed_at'],
-            job.get('applicants_count', None), job.get('overall_relevance', 0.0),
-            job.get('is_posted', 1), job.get('application_status', 'not applied')
-        ))
+        q = load_sql_queries()['is_company_blacklisted']
+        c = conn.execute(q, (company_name,))
+        return c.fetchone()[0] > 0
+    except:
+        return False
+
+def insert_job(conn, job):
+    q = load_sql_queries()['insert_job']
+    params = (
+        job['title'],
+        job['company'],
+        job['company_url'],
+        job['location'],
+        job['description'],
+        job['remote_allowed'],
+        job['job_state'],
+        job.get('company_size', 'Unknown'),
+        job.get('company_size_score', 0),
+        job['job_url'],
+        job['date'],
+        job['listed_at'],
+        job.get('applicants_count', None),
+        job.get('overall_relevance', 0.0),
+        job.get('is_posted', 1),
+        job.get('application_status', 'not applied')
+    )
+    try:
+        conn.execute(q, params)
         conn.commit()
-        logger.debug(f"Inserted/updated job {job['job_url']}")
+        logger.debug(f"Inserted job {job['job_url']}")
     except Exception as e:
-        logger.error(f"Error inserting job: {e}\nJob data: {job}")
+        logger.error(f"Insert error: {e}")
 
-def is_company_blacklisted(conn: sqlite3.Connection, company_name: str, company_url: str) -> bool:
-    """
-    Check whether a company is blacklisted based on its name.
-    This function queries the separate 'blacklisted_companies' table.
-    """
-    query = "SELECT COUNT(*) FROM blacklisted_companies WHERE LOWER(company) = LOWER(?)"
-    cursor = conn.execute(query, (company_name,))
-    return cursor.fetchone()[0] > 0
-
-def job_exists(conn: sqlite3.Connection, job_url: str) -> bool:
-    """
-    Check if a job exists in the job_listings table based on its URL.
-    """
-    queries = load_sql_queries()
-    cursor = conn.execute(queries["job_exists"], (job_url,))
-    return cursor.fetchone()[0] > 0
-
-def get_jobs_for_scoring(conn: sqlite3.Connection, limit: int = 1) -> List[Dict[str, Any]]:
-    """
-    Retrieve jobs that need to be scored.
-    """
-    queries = load_sql_queries()
-    query: str = queries["get_jobs_for_scoring"]
+def update_job_scores(conn, job_id, ranked):
+    q = load_sql_queries()['update_job_scores']
+    params = (
+        ranked.get('preliminary_score', 0.0),
+        ranked.get('skills_match', 0.0),
+        ranked.get('model_fit_score', 0.0),
+        ranked.get('success_probability', 50.0),
+        ranked.get('role_complexity', 50.0),
+        ranked.get('effort_days_to_fit', 0.0),
+        ranked.get('critical_skill_mismatch_penalty', 0.0),
+        ranked.get('experience_gap', 0.0),
+        ranked.get('areas_for_development', ''),
+        ranked.get('reasoning', ''),
+        int(time.time()),
+        job_id
+    )
     try:
-        cursor = conn.execute(query, (limit,))
-        results = cursor.fetchmany(limit)
-        total_jobs = results[0][-1] if results else 0
-        logger.debug(f"Found {total_jobs} jobs available for scoring. Fetching {len(results)} for processing.")
-        if results:
-            logger.debug(f"Sample job - ID: {results[0][0]}, Title: {results[0][2]} @ {results[0][1]}")
-        cols = [col[0] for col in cursor.description]
-        # Exclude the last column (total_jobs) when building the dict.
-        return [dict(zip(cols[:-1], row[:-1])) for row in results]
-    except sqlite3.Error as e:
-        logger.error(f"Database error: {e}")
+        conn.execute(q, params)
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Update scores error: {e}")
+
+def job_exists(conn, job_url):
+    q = load_sql_queries()['job_exists']
+    c = conn.execute(q, (job_url,))
+    return c.fetchone()[0] > 0
+
+def get_jobs_for_scoring(conn, limit=1):
+    q = load_sql_queries()['get_jobs_for_scoring']
+    c = conn.execute(q, (limit,))
+    rows = c.fetchmany(limit)
+    if not rows:
         return []
+    tot = rows[0][-1]
+    logger.debug(f"Found {tot} jobs for scoring, returning {len(rows)} now.")
+    cols = [desc[0] for desc in c.description]
+    out = []
+    for r in rows:
+        d = dict(zip(cols[:-1], r[:-1]))
+        out.append(d)
+    return out
 
-def load_blacklist(conn: sqlite3.Connection) -> Dict[str, Set[str]]:
-    """
-    Load keyword-based blacklist and whitelist data from the database.
-    Company-specific blacklist entries are now stored in a separate table.
-    """
-    queries = load_sql_queries()
-    query = "SELECT type, value FROM blacklist"
-    try:
-        cursor = conn.execute(query)
-        bl_data: Dict[str, Set[str]] = {"blacklist": set(), "whitelist": set()}
-        for typ, val in cursor.fetchall():
-            typ = typ.strip().lower()
-            val = val.strip()
-            if typ in bl_data:
-                bl_data[typ].add(val)
-            else:
-                # If an unknown type is encountered, default it to blacklist.
-                bl_data["blacklist"].add(val)
-        return bl_data
-    except Exception as e:
-        logger.error(f"Error loading blacklist: {e}")
-        return {"blacklist": set(), "whitelist": set()}
-
-def update_job_scores(conn: sqlite3.Connection, job_id: int, ranked_job: Dict[str, Any]) -> None:
-    """
-    Update the job scores in the database for a given job.
-    """
-    queries = load_sql_queries()
-    try:
-        conn.execute(queries["update_job_scores"], (
-            ranked_job.get('final_score', 0.0),
-            ranked_job.get('skills_match', 0.0),
-            ranked_job.get('resume_similarity', 0.0),
-            ranked_job.get('final_fit_score', 0.0),
-            ranked_job.get('success_probability', 0.6),
-            ranked_job.get('confidence', 0.7),
-            ranked_job.get('effort_days_to_fit', 7),
-            ranked_job.get('critical_skill_mismatch_penalty', 0.0),
-            ranked_job.get('areas_for_development', ''),
-            ranked_job.get('reasoning', ''),
-            job_id
-        ))
-        conn.commit()
-    except Exception as e:
-        logger.error(f"Error updating job scores: {e}")
+# def add_fit_score_columns(conn):
+#     # Usually we rely on create_job_listings_table for fresh DB,
+#     # or use migrate_schema.py for existing DB. This is optional.
+#     pass

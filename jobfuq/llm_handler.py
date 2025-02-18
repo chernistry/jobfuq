@@ -118,7 +118,7 @@ class AIModel:
         self.encoder = tiktoken.encoding_for_model("gpt-3.5-turbo")
 
         # Load the prompt template from the configuration file.
-        prompt_path: str = self.config.get("prompt", "prompts/deepseek_r1_career_advisor_template.txt")
+        prompt_path: str = self.config.get("prompt", "prompts/examples/deepseek_r1_career_advisor_template.txt")
         prompt_path = os.path.join(os.path.dirname(__file__), prompt_path)
         with open(prompt_path, 'r') as file:
             self.prompt_template: str = file.read()
