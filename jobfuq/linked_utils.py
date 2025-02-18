@@ -18,7 +18,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from jobfuq.logger import logger
 from jobfuq.utils import load_config
 
-
 # ==== CONFIGURATION & SESSION STORE SETUP ==== #
 SESSION_STORE_DIR: str = "session_store"
 try:
@@ -33,8 +32,6 @@ os.makedirs(SESSION_STORE_DIR, exist_ok=True)
 
 scraping_mode: str = main_config.get("scraping", {}).get("mode", "normal").lower()
 linked_config: Dict[str, Any] = load_config("jobfuq/conf/linked_config.toml")
-
-
 
 
 # ==== BROWSER & PAGE STEALTH METHODS ==== #
@@ -68,8 +65,6 @@ async def create_stealth_browser(browser_type: BrowserType) -> Any:
     )
 
 
-
-
 async def apply_stealth_scripts(page: Any) -> None:
     """
     Inject JavaScript to mask WebRTC and fingerprinting signals.
@@ -99,8 +94,6 @@ async def apply_stealth_scripts(page: Any) -> None:
     await page.add_init_script("() => { window.AudioContext = undefined; }")
 
 
-
-
 async def block_resources(route: Route, request: Request) -> None:
     """
     Blocks images, fonts, or media resources to speed up scraping.
@@ -116,7 +109,6 @@ async def block_resources(route: Route, request: Request) -> None:
         await route.abort()
     else:
         await route.continue_()
-
 
 
 async def random_network_throttling(page: Any) -> None:
@@ -137,8 +129,6 @@ async def random_network_throttling(page: Any) -> None:
             "longitude": random.uniform(-180, 180),
         }
     )
-
-
 
 
 async def fake_http_traffic(page: Any) -> None:
@@ -164,8 +154,6 @@ async def fake_http_traffic(page: Any) -> None:
         )
     except Exception as e:
         logger.debug(f"Fake HTTP traffic error: {e}")
-
-
 
 
 async def generate_realistic_mouse_physics(page: Any) -> None:
@@ -200,8 +188,6 @@ async def generate_realistic_mouse_physics(page: Any) -> None:
             await asyncio.sleep(random.uniform(0.001, 0.005))
 
 
-
-
 async def simulate_reading_patterns(page: Any) -> None:
     """
     Perform slow scrolling to mimic reading behavior.
@@ -215,8 +201,6 @@ async def simulate_reading_patterns(page: Any) -> None:
         await asyncio.sleep(random.uniform(1, 2))
 
 
-
-
 async def scroll_randomly(page: Any) -> None:
     """
     Scroll unpredictably to simulate human behavior.
@@ -228,10 +212,6 @@ async def scroll_randomly(page: Any) -> None:
         scroll_distance: int = random.randint(-400, 400)
         await page.mouse.wheel(0, scroll_distance)
         await asyncio.sleep(random.uniform(0.3, 1.2))
-
-
-
-
 
 
 # ==== STEALTH & HUMAN BEHAVIOR SIMULATION ==== #
@@ -273,8 +253,6 @@ async def simulate_human_behavior(page: Any) -> None:
         y: int = random.randint(0, viewport["height"])
         await page.mouse.move(x, y)
         await asyncio.sleep(random.uniform(0.1, 0.5))
-
-
 
 
 # ==== CAPTCHA HANDLING & FEED WAITING ==== #
@@ -327,8 +305,6 @@ async def handle_manual_captcha(page: Any, playwright: Any, config: Dict[str, An
         return page
 
 
-
-
 async def wait_for_feed(
         page: Any, playwright: Any, config: Dict[str, Any], timeout: int = 30000, interval: int = 1000
 ) -> Optional[Any]:
@@ -369,8 +345,6 @@ async def wait_for_feed(
     return None
 
 
-
-
 # ==== USER INTERACTION METHODS ==== #
 async def type_like_human(page: Any, selector: str, text: str) -> None:
     """
@@ -386,8 +360,6 @@ async def type_like_human(page: Any, selector: str, text: str) -> None:
         await asyncio.sleep(random.uniform(0.03, 0.25))
         if random.random() < 0.1:
             await asyncio.sleep(random.uniform(0.5, 1.5))
-
-
 
 
 async def move_mouse_and_click(page: Any, selector: str) -> None:
@@ -409,12 +381,10 @@ async def move_mouse_and_click(page: Any, selector: str) -> None:
                     box["x"] + box["width"] / 2 + x_offset,
                     box["y"] + box["height"] / 2 + y_offset,
                     steps=random.randint(3, 10),
-                    )
+                )
                 await asyncio.sleep(random.uniform(0.05, 0.2))
             await page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             await asyncio.sleep(random.uniform(0.2, 0.6))
-
-
 
 
 def extract_emails_from_text(text: str) -> Optional[List[str]]:
@@ -433,8 +403,6 @@ def extract_emails_from_text(text: str) -> Optional[List[str]]:
     return email_regex.findall(text)
 
 
-
-
 def refined_clean_text(text: str) -> str:
     """
     Clean the text by converting multiple spaces to a single space and stripping whitespace.
@@ -446,8 +414,6 @@ def refined_clean_text(text: str) -> str:
         str: The cleaned text.
     """
     return re.sub(r"\s+", " ", text).strip()
-
-
 
 
 # ==== SESSION & COOKIE MANAGEMENT ==== #
@@ -468,8 +434,6 @@ async def load_storage(storage_file: str) -> List[Any]:
     except (FileNotFoundError, json.JSONDecodeError):
         logger.debug(f"Session file not found or invalid JSON: {storage_file}")
         return []
-
-
 
 
 async def load_session(page: Any, username: str) -> bool:
@@ -494,8 +458,6 @@ async def load_session(page: Any, username: str) -> bool:
         return False
 
 
-
-
 async def rotate_session(context: Any) -> bool:
     """
     Load and apply a random stored session from the session store.
@@ -518,8 +480,6 @@ async def rotate_session(context: Any) -> bool:
             logger.debug(f"Rotated session: {selected_session}")
             return True
     return False
-
-
 
 
 # ==== LOGIN & SESSION MANAGEMENT ==== #
@@ -582,8 +542,6 @@ async def get_company_size(page: Any, url: str) -> str:
         return "Unknown"
 
 
-
-
 def parse_company_size(size_text: str) -> str:
     """
     Extract and normalize the numerical company size from various text formats.
@@ -599,8 +557,6 @@ def parse_company_size(size_text: str) -> str:
     size_text = re.sub(r"(\d+)\s*-\s*(\d+)", r"\1-\2", size_text)
     size_text = size_text.replace("k", "000").replace("K", "000").replace("+", "+")
     return size_text
-
-
 
 
 def get_company_size_score(size_text: str) -> int:
@@ -621,3 +577,68 @@ def get_company_size_score(size_text: str) -> int:
         if key in size_text:
             return score
     return 0
+
+
+async def ensure_logged_in(
+        page: Any, username: str, password: str, playwright: Any, config: Dict[str, Any]
+) -> Optional[Any]:
+    """
+    Ensure the user is logged in by either loading an existing session or performing a fresh login.
+    Returns the page instance with a valid session.
+
+    Args:
+        page (Any): The current Playwright page instance.
+        username (str): The account username.
+        password (str): The account password.
+        playwright (Any): The Playwright module.
+        config (Dict[str, Any]): The configuration dictionary.
+
+    Returns:
+        Optional[Any]: The page instance after a successful login, or None if login failed.
+    """
+    try:
+        await apply_stealth_scripts(page)
+        session_loaded: bool = await load_session(page, username)
+
+        urls_conf: Dict[str, Any] = linked_config.get("urls", {})
+        feed_url: str = urls_conf.get("feed_url", "https://www.linkedin.com/feed/")
+        login_url: str = urls_conf.get("login_url", "https://www.linkedin.com/login")
+        wait_until: str = urls_conf.get("wait_until", "domcontentloaded")
+
+        if session_loaded:
+            await page.goto(feed_url, wait_until=wait_until, timeout=20000)
+            new_page: Optional[Any] = await wait_for_feed(page, playwright, config)
+            if new_page:
+                logger.debug(f"Using saved session for account: {username}")
+                return new_page
+            else:
+                logger.debug(f"Session for {username} didn't load feed. Logging in fresh.")
+
+        await page.goto(login_url, wait_until=wait_until)
+        await simulate_human_behavior(page)
+
+        username_input = await page.query_selector("input#username")
+        if username_input:
+            await type_like_human(page, "input#username", username)
+            await type_like_human(page, "input#password", password)
+        else:
+            password_input = await page.query_selector("input#password")
+            if password_input:
+                await type_like_human(page, "input#password", password)
+            else:
+                logger.error("Neither username nor password field found!")
+                return None
+
+        await move_mouse_and_click(page, 'button[type="submit"]')
+        new_page = await wait_for_feed(page, playwright, config)
+        if not new_page:
+            logger.error(f"Login failed for account {username}. Unexpected URL: {page.url}")
+            return None
+
+        logger.debug(f"Successfully logged in: {username}")
+        session_path: str = os.path.join(SESSION_STORE_DIR, f"linkedin_session_{username}.json")
+        await page.context.storage_state(path=session_path)
+        return new_page
+    except Exception as e:
+        logger.error(f"Login failed for account {username}: {e}")
+        return None
