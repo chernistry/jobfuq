@@ -3,7 +3,7 @@
 #######################################
 
 # Only job postings newer than this (in seconds) will be considered.
-time_filter = "604800"  # 7 days
+time_filter = "604800"      # 7 days
 
 # Number of concurrent job detail pages to process.
 concurrent_details = 7
@@ -12,11 +12,12 @@ concurrent_details = 7
 max_postings = 1000
 
 # Delay (in seconds) before retrying a failed extraction.
-retry_delay = 180  # 3 minutes
+retry_delay = 180           # 3 minutes
 
 # Run in headless mode.
 headless = true
-#manual_login = true
+# manual_login = true
+
 
 #######################################
 #         DATABASE CONFIGURATION      #
@@ -24,6 +25,7 @@ headless = true
 
 # Path to the SQLite database for storing job listings.
 db_path = "data/job_listings.db"
+
 
 #######################################
 #         SCRAPING SETTINGS           #
@@ -40,6 +42,7 @@ user_agents = [
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ]
 
+
 #######################################
 #         JOB SEARCH QUERIES          #
 #######################################
@@ -47,7 +50,7 @@ user_agents = [
 [[search_queries]]
 keywords = "DevOps Engineer"
 location = "USA"
-f_WT = "1"  # 1 = On-Site, 2 = Remote, 3 = Hybrid
+f_WT = "1"    # 1 = On-Site, 2 = Remote, 3 = Hybrid
 
 [[search_queries]]
 keywords = "LLM Engineer"
@@ -58,6 +61,7 @@ f_WT = "1"
 keywords = "Penguin Flipper"
 location = "Canada"
 f_WT = "1"
+
 
 #######################################
 #      LINKEDIN CREDENTIALS (AUTH)    #
@@ -73,6 +77,7 @@ password = "dummy_password_1"
 username = "dummy2@example.com"
 password = "dummy_password_2"
 
+
 #######################################
 #   AI PROVIDERS & API CONFIGURATION  #
 #######################################
@@ -86,7 +91,7 @@ threads = 4
 # Together AI provider settings.
 together_api_key = "DUMMY_TOGEATHER_API_KEY"
 together_model = "dummy_model/together"
-together_rpm = 60  # Requests per minute
+together_rpm = 60      # Requests per minute
 
 # OpenRouter AI provider settings.
 openrouter_api_keys = [
@@ -95,6 +100,7 @@ openrouter_api_keys = [
 ]
 openrouter_model = "dummy_model/openrouter"
 
+
 #######################################
 #      AI PROMPT CONFIGURATION        #
 #######################################
@@ -102,13 +108,14 @@ openrouter_model = "dummy_model/openrouter"
 # Path to the prompt template used for AI evaluations.
 prompt = "prompts/deepseek_r1_career_advisor_template.txt"
 
+
 #######################################
 #         DEBUG CONFIGURATION         #
 #######################################
 
 [debug]
 enabled = false
-mode = "single_link"  # Options: "single_link", "search_mode", "rescrape_by_db_query"
+mode = "single_link"    # Options: "single_link", "search_mode", "rescrape_by_db_query"
 sql_query = '''SELECT * FROM main.job_listings'''
 search_limit = 3
 job_links = [
