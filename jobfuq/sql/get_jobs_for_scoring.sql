@@ -1,8 +1,15 @@
 WITH RankedJobs AS (
     SELECT
-        jl.id, jl.company, jl.title, jl.description, jl.application_status, jl.date,
-        jl.applicants_count, jl.company_size_score, jl.listed_at, jl.model_fit_score,
-        -- Priority scoring based on common DevOps and related keywords
+        jl.id,
+        jl.company,
+        jl.title,
+        jl.description,
+        jl.application_status,
+        jl.date,
+        jl.applicants_count,
+        jl.company_size_score,
+        jl.listed_at,
+        jl.model_fit_score,
         CASE
             WHEN LOWER(jl.title) LIKE '%devops%' THEN 10
             WHEN LOWER(jl.title) LIKE '%platform%' THEN 9
@@ -25,17 +32,15 @@ WITH RankedJobs AS (
             END AS priority_score
     FROM job_listings jl
     WHERE jl.is_posted = 1
-      AND jl.application_status LIKE 'not applied%'
-      AND jl.model_fit_score = 0
+      AND jl.application_status LIKE '%not applied%'
+      AND (jl.preliminary_score IS NULL OR jl.preliminary_score = 0)
       AND jl.company IS NOT NULL
       AND jl.description IS NOT NULL
       AND TRIM(jl.description) <> ''
-      -- Exclude blacklisted companies
       AND NOT EXISTS (
         SELECT 1 FROM blacklisted_companies bc
         WHERE LOWER(jl.company) = LOWER(bc.company)
     )
-      -- Exclude blacklisted titles unless whitelisted
       AND NOT EXISTS (
         SELECT 1 FROM blacklist bl
         WHERE bl.type = 'blacklist'
@@ -48,7 +53,13 @@ WITH RankedJobs AS (
     )
 )
 SELECT *,
-       (SELECT COUNT(*) FROM job_listings WHERE model_fit_score = 0) AS total_jobs
+       (
+           SELECT COUNT(*)
+           FROM job_listings
+           WHERE is_posted = 1
+             AND application_status LIKE 'not applied%'
+             AND preliminary_score IS NULL
+       ) AS total_jobs
 FROM RankedJobs
 ORDER BY priority_score DESC
 LIMIT ?;

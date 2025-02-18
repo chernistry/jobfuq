@@ -14,15 +14,41 @@ from rich.columns import Columns
 
 from .utils import load_config
 from .llm_handler import AIModel, evaluate_job, ProviderManager
-from .database import (
-    create_connection,
-    get_jobs_for_scoring,
-    update_job_scores,
-)
+from .database import create_connection, get_jobs_for_scoring, update_job_scores
 from .logger import logger, set_verbose
 
 console = Console()
 retry_map = {}
+
+# Define a 10-level gradient from red to green.
+COLOR_GRADIENT = [
+    "#FF0000", "#FF3300", "#FF6600", "#FF9900", "#FFCC00",
+    "#FFFF00", "#CCFF00", "#99FF00", "#66FF00", "#33FF00"
+]
+
+def ascii_block(value: int) -> str:
+    if value <= 25:
+        return "░"
+    elif value <= 50:
+        return "▒"
+    elif value <= 75:
+        return "▓"
+    else:
+        return "█"
+
+def color_for_value(value: int, reverse: bool = False) -> str:
+    # If reverse is True, high value is bad (red); otherwise, high is good (green)
+    if reverse:
+        idx = min((100 - value) // 10, 9)
+    else:
+        idx = min(value // 10, 9)
+    return COLOR_GRADIENT[idx]
+
+def format_metric_as_block(value: int, reverse: bool = False) -> str:
+    block = ascii_block(value)
+    color = color_for_value(value, reverse=reverse)
+    # Fixed width formatting: block in 2 chars, value as 3-digit integer.
+    return f"[{color}]{block:2s} {value:3d}[/]"
 
 def calculate_recency_score(job_date, max_days=60):
     try:
@@ -31,7 +57,6 @@ def calculate_recency_score(job_date, max_days=60):
             d = 0
         if d > max_days:
             return 0.0
-        # Scale: 0 (old) to 100 (fresh)
         return max(0.0, min(100.0, 100.0 * (1.0 - d / float(max_days))))
     except Exception as e:
         logger.error(f"Error calculating recency score: {e}")
@@ -77,35 +102,52 @@ def calculate_preliminary_score(e: Dict[str, float], rec: float, applicants: int
     return max(0.0, min(score, 100.0))
 
 def display_evaluation(updated: Dict[str, Any], recency: float, app_count: int) -> None:
-    # Left column: Key Metrics with emojis
-    metrics_table = Table(title="[bold blue]Metrics[/bold blue]", show_header=True, header_style="bold magenta")
-    metrics_table.add_column("Metric", style="cyan")
-    metrics_table.add_column("Value", style="green")
-    metrics_table.add_row("🏆 Preliminary Score", f"{updated.get('preliminary_score', 0.0):.1f}")
-    metrics_table.add_row("✅ Skills Match", f"{updated.get('skills_match', 0.0):.1f}")
-    metrics_table.add_row("📊 Model Fit", f"{updated.get('model_fit_score', 0.0):.1f}")
-    metrics_table.add_row("🎯 Success Prob.", f"{updated.get('success_probability', 50.0):.1f}")
-    metrics_table.add_row("⚠️ Experience Gap", f"{updated.get('experience_gap', 0.0):.1f}")
-    metrics_table.add_row("🚫 Crit. Penalty", f"{updated.get('critical_skill_mismatch_penalty', 0.0):.1f}")
-    metrics_table.add_row("🤔 Role Complexity", f"{updated.get('role_complexity', 0.0):.1f}")
-    metrics_table.add_row("⏳ Effort Days", f"{updated.get('effort_days_to_fit', 0.0):.1f}")
-    metrics_table.add_row("🕒 Recency", f"{recency:.1f}")
-    metrics_table.add_row("👥 Applicants", str(app_count))
+    metrics_table = Table(show_header=True, header_style="bold magenta")
+    metrics_table.add_column("Metric", style="cyan", justify="left")
+    metrics_table.add_column("Value", style="green", justify="right")
 
-    # Right column: Job Details
-    title = updated.get('title', 'N/A')
-    company = updated.get('company', 'N/A')
-    reasoning = updated.get('reasoning', 'No reasoning provided.')
-    dev_areas = updated.get('areas_for_development', 'None specified.')
+    # Convert values to integers.
+    prelim = int(round(updated.get('preliminary_score', 0.0)))
+    sm = int(round(updated.get('skills_match', 0)))
+    mf = int(round(updated.get('model_fit_score', 0)))
+    sp = int(round(updated.get('success_probability', 50)))
+    xp_gap = int(round(updated.get('experience_gap', 0)))
+    cp = int(round(updated.get('critical_skill_mismatch_penalty', 0)))
+    rc = int(round(updated.get('role_complexity', 0)))
+    ed = int(round(updated.get('effort_days_to_fit', 0)))
+    rec_i = int(round(recency))
+    app_i = int(round(app_count))
+
+    metrics_table.title = "[bold blue]Results[/bold blue]"
+    # For positive metrics, higher is better (green high). For negatives, reverse the gradient.
+    metrics_table.add_row("🏆 Preliminary Score", format_metric_as_block(prelim))
+    metrics_table.add_row("✅ Skills Match", format_metric_as_block(sm))
+    metrics_table.add_row("📊 Model Fit", format_metric_as_block(mf))
+    metrics_table.add_row("🎯 Success Prob.", format_metric_as_block(sp))
+    # Experience gap is a negative metric: higher gap is worse.
+    metrics_table.add_row("⚠️ Experience Gap", format_metric_as_block(xp_gap, reverse=True))
+    # Critical penalty is negative.
+    metrics_table.add_row("🚫 Crit. Penalty", format_metric_as_block(cp, reverse=True))
+    # Role complexity: assume higher is worse.
+    metrics_table.add_row("🤔 Role Complexity", format_metric_as_block(rc, reverse=True))
+    # Effort days: higher means more work.
+    metrics_table.add_row("⏳ Effort Days", format_metric_as_block(ed, reverse=True))
+    # Recency: higher recency (fresher) is good.
+    metrics_table.add_row("🕒 Recency", format_metric_as_block(rec_i))
+    # Applicants: more applicants is bad.
+    metrics_table.add_row("👥 Applicants", format_metric_as_block(app_i, reverse=True))
+
+    title_str = updated.get('title', 'N/A')
+    company_str = updated.get('company', 'N/A')
+    reasoning_str = updated.get('reasoning', 'No reasoning provided.')
+    dev_areas_str = updated.get('areas_for_development', 'None specified.')
     details = (
-        f"[bold blue]💼 {title}[/bold blue] @ [bold green]{company}[/bold green]\n\n"
-        f"[bold yellow]📝 Reasoning:[/bold yellow]\n{reasoning}\n\n"
-        f"[bold yellow]🛠️ Development Areas:[/bold yellow]\n{dev_areas}"
+        f"💼 [bold blue]{title_str}[/bold blue] @ [bold green]{company_str}[/bold green]\n\n"
+        f"📝 [bold yellow]Reasoning:[/bold yellow]\n{reasoning_str}\n\n"
+        f"🛠️ [bold yellow]Development Areas:[/bold yellow]\n{dev_areas_str}"
     )
     details_panel = Panel(details, title="Job Details", border_style="bright_blue")
-
-    # Display side-by-side columns
-    cols = Columns([metrics_table, details_panel])
+    cols = Columns([metrics_table, details_panel], equal=True, expand=True)
     console.print(cols)
 
 async def evaluate_and_update_job(job: Dict[str, Any], model: AIModel, conn, verbose: bool):
@@ -117,17 +159,12 @@ async def evaluate_and_update_job(job: Dict[str, Any], model: AIModel, conn, ver
             logger.warning(f"⚠️ No evaluation for job {job['id']}")
             retry_map[job['id']] = time.time() + 180
             return
-        sm = ev.get('skills_match', 0.0)
-        mf = ev.get('model_fit_score', 0.0)
-        reasoning = ev.get('reasoning', '')
-        if sm == 0 and mf == 0 and not reasoning:
-            logger.warning(f"⚠️ Job {job['id']} has zero extraction; scheduling retry.")
-            retry_map[job['id']] = time.time() + 180
-            return
-        final_score = calculate_preliminary_score(ev, recency, app_count, calculate_company_size_score(job.get('company_size_score', 0)))
-        updated = {**job, **ev, 'preliminary_score': final_score}
+        final_score = calculate_preliminary_score(ev, recency, app_count,
+                                                  calculate_company_size_score(job.get('company_size_score', 0)))
+        final_score_int = int(round(final_score))
+        updated = {**job, **ev, 'preliminary_score': final_score_int}
         update_job_scores(conn, job['id'], updated)
-        logger.info(f"✅ Job {job['id']} updated: Preliminary Score = {final_score:.2f}")
+        logger.info(f"✅ Job {job['id']} updated: Preliminary Score = {final_score_int}")
         if verbose:
             display_evaluation(updated, recency, app_count)
     except Exception as ex:
@@ -209,7 +246,7 @@ async def main(config_path, verbose, endless, threads):
         sys.exit(1)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process & rank jobs with enhanced UI output')
+    parser = argparse.ArgumentParser(description='Process & rank jobs with ASCII gradient + color output')
     parser.add_argument('config', nargs='?', default='jobfuq/conf/config.toml', help='Path to config file')
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase output verbosity')
     parser.add_argument('--endless', action='store_true', help='Run in endless mode (loop forever)')

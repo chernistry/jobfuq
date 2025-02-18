@@ -11,4 +11,4 @@ SET
     areas_for_development = ?,
     reasoning = ?,
     last_reranked = ?
-WHERE id = ?
+WHERE id = ?;
