@@ -1,6 +1,6 @@
 # JOBFUQ: Jackpot Opportunity Bot for Fixing Unemployment Quick
 
-[banner.png](assets/banner.png)
+![banner.png](assets/banner.png)
 
 Tired of tailoring your CV just to be ghosted faster than a bad Tinder date? **JOBFUQ** is your AI-powered, LinkedIn-scraping, career-saving chaos agent—finding jobs that might actually deserve you (because rejection should at least come with effort).
 No more doomscrolling through listings that require ten years of experience in a four-year-old framework. **JOBFUQ** adapts to your career missteps, your inflated skills, and even your creative interpretations of “team player.”
