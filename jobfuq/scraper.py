@@ -2,8 +2,15 @@
 """
 LinkedIn Scraper
 
-This script scrapes LinkedIn job listings with visual output using Rich,
-displaying configuration flags, progress messages, and debug information.
+This script scrapes LinkedIn job listings with advanced visual output using Rich.
+It displays configuration flags, progress messages, live updates, and debug
+information.
+
+Usage:
+    python scraper.py [OPTIONS]
+
+Raises:
+    RuntimeError: If critical configuration loading fails.
 """
 
 import sys
@@ -26,6 +33,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.columns import Columns
+from rich.live import Live
+from rich.text import Text
 
 from jobfuq.logger import logger, set_verbose
 from jobfuq.linked_utils import (
@@ -54,12 +63,18 @@ from jobfuq.processor import process_and_rank_jobs
 from jobfuq.llm_handler import AIModel
 
 
-# ==== GLOBAL CONSOLE INSTANCE ==== #
+# =============================================================================
+# GLOBAL VARIABLES & CONSTANTS
+# =============================================================================
 
 console: Console = Console()
 
 
-# ==== CONFIGURATION FLAGS DISPLAY ==== #
+# =============================================================================
+# CONFIGURATION FLAGS DISPLAY
+# =============================================================================
+# ──► DISPLAY CONFIGURATION FLAGS WITH RICH
+# =============================================================================
 
 def print_config_flags(config: Dict[str, Any], args: argparse.Namespace) -> None:
     """
@@ -68,6 +83,9 @@ def print_config_flags(config: Dict[str, Any], args: argparse.Namespace) -> None
     Args:
         config (Dict[str, Any]): The configuration dictionary.
         args (argparse.Namespace): Parsed command-line arguments.
+
+    Returns:
+        None
     """
     flags: Dict[str, Any] = {
         "Manual Login": args.manual_login,
@@ -76,7 +94,10 @@ def print_config_flags(config: Dict[str, Any], args: argparse.Namespace) -> None
         "Scraping Mode": config.get("scraping", {}).get("mode", "normal"),
         "Verbose": args.verbose or config.get("debug", {}).get("verbose", False),
     }
-    table: Table = Table(show_header=True, header_style="bold magenta")
+
+    table: Table = Table(
+        show_header=True, header_style="bold magenta", expand=True, pad_edge=True
+    )
     table.add_column("Configuration Flag", style="cyan", justify="left")
     table.add_column("Value", style="green", justify="right")
 
@@ -84,15 +105,68 @@ def print_config_flags(config: Dict[str, Any], args: argparse.Namespace) -> None
         mark: str = "[green]✅[/green]" if value else "[red]❌[/red]"
         table.add_row(key, f"{value} {mark}")
 
-    panel: Panel = Panel(table, title="[bold blue]Configuration Flags[/bold blue]", border_style="bright_blue")
+    panel: Panel = Panel(
+        table, title="[bold blue]Configuration Flags[/bold blue]",
+        border_style="bright_blue"
+    )
     console.print(panel)
 
 
-# ==== CORE SCRAPER METHODS ==== #
+# =============================================================================
+# LIVE STATUS UPDATER
+# =============================================================================
+# ──► CONTINUOUSLY UPDATE THE LIVE PANEL WITH SCRAPING STATUS
+# =============================================================================
+
+async def update_live_status(live: Live, status: Dict[str, int]) -> None:
+    """
+    Continuously update the live panel with the current scraping status.
+
+    Args:
+        live (Live): The Rich Live instance.
+        status (Dict[str, int]): A dictionary with status info (e.g. jobs_scraped).
+
+    Returns:
+        None
+    """
+    while True:
+        status_text = Text.assemble(
+            ("🚀 Scraping Jobs...\n", "bold green"),
+            (f"Jobs Scraped: {status.get('jobs_scraped', 0)}", "bold yellow")
+        )
+        live.update(
+            Panel(
+                status_text,
+                title="[bold blue]Scraper Status[/bold blue]",
+                border_style="bright_green"
+            )
+        )
+        await asyncio.sleep(1)
+
+
+# =============================================================================
+# CORE SCRAPER METHODS
+# =============================================================================
+# ──► DATA EXTRACTION PATHWAY
+# =============================================================================
 
 class LinkedInScraper:
     """
     Class to handle scraping of LinkedIn job listings.
+
+    Attributes:
+        config (Dict[str, Any]): Main configuration dictionary.
+        time_filter (str): Time filter parameter.
+        blacklist_data (Dict[str, set]): Blacklist and whitelist data.
+        playwright (Optional[Any]): Playwright instance (if provided).
+        scraper_config (Dict[str, Any]): Additional scraper configuration.
+        base_url (str): Base URL for LinkedIn.
+        wait_until (str): Page load strategy.
+        selector_timeout (int): Timeout for selectors.
+        text_timeout (int): Timeout for text extraction.
+        job_id_attrs (List[str]): Attributes to identify job IDs.
+        scraping_mode (str): Mode for scraping (normal or aggressive).
+        company_size_cache (Dict[str, Any]): Cache for company size data.
     """
 
     def __init__(
@@ -103,14 +177,17 @@ class LinkedInScraper:
             playwright: Optional[Any] = None,
     ) -> None:
         """
-        Initialize the scraper with configuration, time filter, blacklist data,
-        and an optional playwright instance.
+        Initialize the scraper with configuration, time filter, blacklist data, and
+        an optional playwright instance.
 
         Args:
             config (Dict[str, Any]): Main configuration dictionary.
             time_filter (str): Time filter parameter.
             blacklist_data (Dict[str, set]): Blacklist and whitelist data.
             playwright (Optional[Any], optional): Playwright instance. Defaults to None.
+
+        Raises:
+            RuntimeError: If configuration loading fails.
         """
         self.config: Dict[str, Any] = config
         self.time_filter: str = time_filter
@@ -143,11 +220,12 @@ class LinkedInScraper:
 
         self.company_size_cache: Dict[str, Any] = {}
 
+    # -------------------------------------------------------------------------
+    # SEARCH JOBS
+    # -------------------------------------------------------------------------
+
     async def search_jobs(
-            self,
-            page: Any,
-            keywords: str,
-            location: str,
+            self, page: Any, keywords: str, location: str,
             remote: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -182,7 +260,6 @@ class LinkedInScraper:
         logger.info(f"Landed on: {page.url}")
         await simulate_human_behavior(page)
 
-        # Wait for the job list to appear using provided selectors
         for sel in self.scraper_config.get("jobs", {}).get("job_list_selectors", []):
             try:
                 await page.wait_for_selector(sel, timeout=self.selector_timeout)
@@ -198,7 +275,6 @@ class LinkedInScraper:
         while len(job_infos) < max_postings:
             logger.info(f"Current page: {page.url}")
             job_infos.extend(await self.extract_job_infos(page))
-            # Remove duplicates by job_id
             job_infos = list({x["job_id"]: x for x in job_infos}.values())
             logger.info(f"Total jobs so far: {len(job_infos)}")
 
@@ -216,12 +292,15 @@ class LinkedInScraper:
                 if not await self.go_to_next_page(page, page_num):
                     logger.info("Pagination failed / no more pages.")
                     break
-                # Prevent potential pagination loop
                 if page.url == page.url:
                     break
                 page_num += 1
 
         return job_infos[:max_postings]
+
+    # -------------------------------------------------------------------------
+    # PAGINATION
+    # -------------------------------------------------------------------------
 
     async def go_to_next_page(self, page: Any, current_page: int) -> bool:
         """
@@ -264,6 +343,10 @@ class LinkedInScraper:
         logger.info(f"No valid pagination for page {next_num}.")
         return False
 
+    # -------------------------------------------------------------------------
+    # JOB INFORMATION EXTRACTION
+    # -------------------------------------------------------------------------
+
     async def extract_job_infos(self, page: Any) -> List[Dict[str, Any]]:
         """
         Extract job information from the job cards on the current page.
@@ -276,10 +359,11 @@ class LinkedInScraper:
         """
         results: List[Dict[str, Any]] = []
         logger.info("Extracting job cards...")
-        card_selectors: List[str] = self.scraper_config.get("jobs", {}).get("job_card_selectors", [])
+        card_selectors: List[str] = self.scraper_config.get("jobs", {}).get(
+            "job_card_selectors", []
+        )
         job_cards: List[Any] = []
 
-        # Find the job cards using provided selectors
         for sel in card_selectors:
             try:
                 found: List[Any] = await page.query_selector_all(sel)
@@ -312,7 +396,6 @@ class LinkedInScraper:
             title: str = (await title_elem.text_content()).strip() if title_elem else ""
             logger.info(f"Extracted title: '{title}'")
 
-            # Skip if the title is blacklisted and not whitelisted
             if title and any(bk in title.lower() for bk in blacklist) and not any(
                     wk in title.lower() for wk in whitelist
             ):
@@ -373,6 +456,10 @@ class LinkedInScraper:
         logger.info(f"Extracted {len(results)} job cards.")
         return results
 
+    # -------------------------------------------------------------------------
+    # HELPER METHODS
+    # -------------------------------------------------------------------------
+
     async def extract_job_id(self, card: Any) -> Optional[str]:
         """
         Extract the job ID from a job card using defined attributes.
@@ -403,7 +490,8 @@ class LinkedInScraper:
 
     async def fetch_applicants_count(self, context_obj: Any) -> Optional[int]:
         """
-        Fetch the number of applicants from the provided context using selectors and patterns.
+        Fetch the number of applicants from the provided context using selectors
+        and patterns.
 
         Args:
             context_obj (Any): The element or page from which to extract data.
@@ -416,7 +504,6 @@ class LinkedInScraper:
         xpaths: List[str] = au_conf.get("xpaths", [])
         patterns: List[str] = au_conf.get("patterns", [])
 
-        # Try selector-based extraction
         for sel in selectors:
             try:
                 elem: Any = await context_obj.query_selector(sel)
@@ -429,7 +516,6 @@ class LinkedInScraper:
             except Exception:
                 continue
 
-        # Try xpath-based extraction
         for xpath in xpaths:
             try:
                 elem: Any = await context_obj.query_selector(f"xpath={xpath}")
@@ -442,7 +528,6 @@ class LinkedInScraper:
             except Exception:
                 continue
 
-        # Fallback extraction from full text content
         try:
             full_text: str = (await context_obj.text_content() or "").strip()
             for pattern in patterns:
@@ -478,7 +563,8 @@ class LinkedInScraper:
         Args:
             page (Any): The Playwright page instance.
             job_id (str): The job ID.
-            conn (Optional[sqlite3.Connection], optional): Database connection. Defaults to None.
+            conn (Optional[sqlite3.Connection], optional): Database connection.
+                Defaults to None.
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -700,11 +786,13 @@ class LinkedInScraper:
             return None
 
 
-# ==== SCRAPING WORKFLOW FUNCTIONS ==== #
+# =============================================================================
+# SCRAPING WORKFLOW FUNCTIONS
+# =============================================================================
+# ──► ORCHESTRATION OF JOB EVALUATION AND SCRAPING
+# =============================================================================
 
-async def evaluate_job(
-        ai_model: AIModel, job: Dict[str, Any]
-) -> Dict[str, Any]:
+async def evaluate_job(ai_model: AIModel, job: Dict[str, Any]) -> Dict[str, Any]:
     """
     Evaluate job fit using the provided AI model.
 
@@ -727,6 +815,7 @@ async def run_scrape(
         endless: bool = False,
         args: Optional[argparse.Namespace] = None,
         playwright: Optional[Any] = None,
+        status: Optional[Dict[str, int]] = None,
 ) -> None:
     """
     Run the scraping process, continuously if specified.
@@ -739,18 +828,22 @@ async def run_scrape(
         endless (bool, optional): Run continuously if True. Defaults to False.
         args (Optional[argparse.Namespace], optional): Command-line arguments.
         playwright (Optional[Any], optional): Playwright instance.
+        status (Optional[Dict[str, int]]): Dictionary for tracking live status.
+
+    Returns:
+        None
     """
     if endless:
         while True:
             async for job in get_jobcards(
-                    config, browser, search_queries, manual_login, args, playwright
+                    config, browser, search_queries, manual_login, args, playwright, status=status
             ):
                 pass
             logger.info("Round complete. Waiting 60 sec...")
             await asyncio.sleep(60)
     else:
         async for job in get_jobcards(
-                config, browser, search_queries, manual_login, args, playwright
+                config, browser, search_queries, manual_login, args, playwright, status=status
         ):
             pass
 
@@ -762,7 +855,8 @@ async def get_jobcards(
         manual_login: bool,
         args: argparse.Namespace,
         playwright: Optional[Any] = None,
-):
+        status: Optional[Dict[str, int]] = None,
+) -> Any:
     """
     Retrieve job cards by initiating a new browser context and handling login.
 
@@ -773,6 +867,7 @@ async def get_jobcards(
         manual_login (bool): Whether to use manual login.
         args (argparse.Namespace): Command-line arguments.
         playwright (Optional[Any], optional): Playwright instance.
+        status (Optional[Dict[str, int]]): Dictionary for tracking live status.
 
     Yields:
         Optional[Dict[str, Any]]: Detailed job data.
@@ -788,7 +883,6 @@ async def get_jobcards(
         logger.error(f"Error loading blacklist: {e}")
         blacklist = {"blacklist": set(), "whitelist": set()}
 
-    # Create a new browser context with randomized viewport and user-agent
     context = await browser.new_context(
         viewport={
             "width": 1280 + random.randint(-50, 50),
@@ -799,7 +893,6 @@ async def get_jobcards(
     await context.route("**/*", block_resources)
     page = await context.new_page()
 
-    # Handle login process (manual or auto)
     if manual_login:
         login_url: str = load_config("jobfuq/conf/linked_config.toml").get(
             "urls", {}
@@ -841,7 +934,6 @@ async def get_jobcards(
         args.extra[0] if args.debug_single and args.extra and len(args.extra) > 0 else None
     )
 
-    # Debug mode for a single job URL
     if debug_job_url:
         logger.info(f"Debug: Using job URL => {debug_job_url}")
         async with semaphore:
@@ -856,6 +948,8 @@ async def get_jobcards(
                 job_data = None
             await detail_page.close()
             if job_data:
+                if status is not None:
+                    status["jobs_scraped"] += 1
                 yield job_data
     else:
         for query in search_queries:
@@ -868,7 +962,9 @@ async def get_jobcards(
             for info in job_infos:
                 job_url: str = f"{scraper.base_url}/jobs/view/{info['job_id']}/"
                 if job_exists(conn, job_url):
-                    cursor = conn.execute("SELECT last_checked FROM job_listings WHERE job_url = ?", (job_url,))
+                    cursor = conn.execute(
+                        "SELECT last_checked FROM job_listings WHERE job_url = ?", (job_url,)
+                    )
                     row = cursor.fetchone()
                     current_time: int = int(time.time() * 1000)
                     if row is None or row[0] is None or current_time - row[0] > 86400000:
@@ -878,22 +974,27 @@ async def get_jobcards(
                         updated_job = await scraper.update_existing_job(conn, job_url, update_page)
                         await update_page.close()
                         if updated_job:
+                            if status is not None:
+                                status["jobs_scraped"] += 1
                             yield updated_job
                     else:
                         logger.debug(f"Job {job_url} exists and is recent; skipping.")
                     continue
                 tasks.append(
                     asyncio.create_task(
-                        fetch_job_detail_task(scraper, info, conn, context, blacklist, semaphore)
+                        fetch_job_detail_task(
+                            scraper, info, conn, context, blacklist, semaphore, status=status
+                        )
                     )
                 )
             if tasks:
                 detailed = await asyncio.gather(*tasks, return_exceptions=True)
                 for detail in detailed:
                     if isinstance(detail, dict) and detail:
+                        if status is not None:
+                            status["jobs_scraped"] += 1
                         yield detail
 
-    # Navigate to feed for cleanup
     try:
         logger.info("Navigating to LinkedIn feed for cleanup.")
         feed_url: str = load_config("jobfuq/conf/linked_config.toml").get(
@@ -916,6 +1017,7 @@ async def fetch_job_detail_task(
         parent_context: Any,
         blacklist: Dict[str, set],
         sem: asyncio.Semaphore,
+        status: Optional[Dict[str, int]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Asynchronously fetch detailed information for a specific job.
@@ -927,6 +1029,7 @@ async def fetch_job_detail_task(
         parent_context (Any): Parent browser context.
         blacklist (Dict[str, set]): Blacklist and whitelist data.
         sem (asyncio.Semaphore): Semaphore for limiting concurrency.
+        status (Optional[Dict[str, int]]): Dictionary for tracking live status.
 
     Returns:
         Optional[Dict[str, Any]]: Detailed job data if successful; otherwise, None.
@@ -960,6 +1063,8 @@ async def fetch_job_detail_task(
             insert_job(conn, job_data)
             conn.commit()
             logger.info(f"Inserted job: {job_data['title']} @ {job_data['company']}")
+            if status is not None:
+                status["jobs_scraped"] += 1
             return job_data
         except Exception as e:
             logger.error(f"Detail task error: {e}")
@@ -968,7 +1073,11 @@ async def fetch_job_detail_task(
             await page.close()
 
 
-# ==== MAIN ENTRY POINT ==== #
+# =============================================================================
+# MAIN ENTRY POINT
+# =============================================================================
+# ──► INITIALIZE AND EXECUTE THE SCRAPER
+# =============================================================================
 
 async def main_scraper(args: argparse.Namespace) -> None:
     """
@@ -976,6 +1085,9 @@ async def main_scraper(args: argparse.Namespace) -> None:
 
     Args:
         args (argparse.Namespace): Command-line arguments.
+
+    Returns:
+        None
     """
     console.print("[bold blue]🚀 Starting LinkedIn Scraper[/bold blue]")
     config: Dict[str, Any] = load_config("jobfuq/conf/config.toml")
@@ -1000,8 +1112,19 @@ async def main_scraper(args: argparse.Namespace) -> None:
     logger.info(f"Launching browser with headless={headless_mode}")
     print_config_flags(config, args)
 
+    status: Dict[str, int] = {"jobs_scraped": 0}
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless_mode, slow_mo=50)
+        live_panel = Panel(
+            Text("Initializing..."),
+            title="[bold blue]Scraper Status[/bold blue]",
+            border_style="bright_green"
+        )
+        live_task = asyncio.create_task(
+            update_live_status(Live(live_panel, refresh_per_second=4), status)
+        )
+
         if args.debug_single or config.get("debug", {}).get("enabled", False):
             logger.info("Debug mode enabled.")
             dbg: Dict[str, Any] = config.get("debug", {})
@@ -1144,7 +1267,6 @@ async def main_scraper(args: argparse.Namespace) -> None:
             await browser.close()
             return
 
-        # Define which recipes to run (scraping, processing, or both)
         recipe: List[str] = args.recipe.split(",") if args.recipe else ["scrap", "process"]
         tasks: List[Any] = []
         if "scrap" in recipe:
@@ -1158,6 +1280,7 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         endless=args.endless,
                         args=args,
                         playwright=p,
+                        status=status,
                     )
                 )
             )
@@ -1180,15 +1303,14 @@ async def main_scraper(args: argparse.Namespace) -> None:
                         logger.info("Task cancelled.")
             else:
                 await asyncio.gather(*tasks)
-
-        await browser.close()
+            await browser.close()
     logger.info("Scraping & processing complete. Browser closed.")
+    live_task.cancel()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Advanced LinkedIn Scraper",
-        add_help=False,
+        description="Advanced LinkedIn Scraper", add_help=False
     )
     parser.add_argument("-h", "--hours", type=int, default=None, help="Time filter in hours")
     parser.add_argument("--manual-login", action="store_true", help="Manual login")
