@@ -373,7 +373,7 @@ Here are some tools to inspect your `job_listings.db`:
 
 ## 📬 Contact & Support
 
-- **Email:** For job seekers and contributors, drop a line at [sanderchernitsky@gmail.com](mailto:sanderchernitsky@gmail.com).
+- **Email:** For job seekers and contributors, drop a line at [endless@loop.in.net](mailto:endless@loop.in.net).
 - **GitHub Issues:** Report bugs or request features on the repository’s Issues page.
 
 > **Disclaimer:** Use JOBFUQ at your own risk. Scraping LinkedIn may violate their terms—so don’t blame us if you get banned.
