@@ -1,6 +1,6 @@
 # JOBFUQ: Jackpot Opportunity Bot for Fixing Unemployment Quick
 
-![banner.png](assets/banner.png)
+[banner.png](assets/banner.png)
 
 Tired of tailoring your CV just to be ghosted faster than a bad Tinder date? **JOBFUQ** is your AI-powered, LinkedIn-scraping, career-saving chaos agent—finding jobs that might actually deserve you (because rejection should at least come with effort).
 No more doomscrolling through listings that require ten years of experience in a four-year-old framework. **JOBFUQ** adapts to your career missteps, your inflated skills, and even your creative interpretations of “team player.”
@@ -148,11 +148,21 @@ python -m jobfuq.scraper --recipe "scrap,process" --verbose [--hours <num>]
 
 ### Provider Configuration
 
-The `[ai_providers]` section in `config.toml` allows you to choose:
+The `[ai_providers]` section in `config.toml` lets you choose between:
 
-- **together:** Uses Together.ai’s models (e.g., `Meta-Llama-3.1-405B-Instruct-Turbo`).
-- **openrouter:** Uses OpenRouter’s free endpoints (e.g., `deepseek/deepseek-r1:free`).
+- **together:** Runs models via Together.ai (e.g., `Meta-Llama-3.1-405B-Instruct-Turbo`).
+- **openrouter:** Allows you to use OpenRouter’s free endpoints (e.g., `deepseek/deepseek-r1:free`) –
+  or go for paid ones if you want better performance.
 - **multi:** Alternates between providers for load balancing.
+
+> **Note:** The **multi** mode is highly experimental and prone to errors. If you're feeling brave,
+> fork it and improve it. Otherwise, it's safer to stick to a single provider.
+>
+> If you're on a budget, here are some solid free options:
+>
+> - `openrouter/meta-llama/llama-3.3-70b-instruct:free` – fast, decent intelligence.
+> - `deepseek/deepseek-r1-distill-llama-70b:free` – more thoughtful, but still efficient.
+> - `deepseek/deepseek-r1:free` – slow as hell on the free tier, but hey, it's **R1**.
 
 Example configuration:
 
