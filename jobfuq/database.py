@@ -254,18 +254,25 @@ def get_jobs_for_scoring(
     """
     q: str = load_sql_queries()["get_jobs_for_scoring"]
     c = conn.execute(q, (limit,))
-    rows = c.fetchmany(limit)
 
-    if not rows:
+    # Fetch first row separately to extract total_jobs
+    first_row = c.fetchone()
+    if not first_row:
+        logger.debug("No jobs found for scoring.")
         return []
 
-    tot = rows[0][-1]
-    logger.debug(f"Found {tot} jobs for scoring, returning {len(rows)} now.")
+    total_jobs = first_row[-1]  # Last column contains total_jobs
+
+    # Fetch remaining rows if limit > 1
+    rows = [first_row] + list(c.fetchmany(limit - 1)) if limit > 1 else [first_row]
+
+    logger.debug(f"Found {total_jobs} jobs for scoring, returning {len(rows)} now.")
+
     cols = [desc[0] for desc in c.description]
     out: List[Dict[str, Any]] = []
 
     for r in rows:
-        d = dict(zip(cols[:-1], r[:-1]))
+        d = dict(zip(cols[:-1], r[:-1]))  # Exclude total_jobs from each row
         out.append(d)
 
     return out
