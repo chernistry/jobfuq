@@ -32,25 +32,25 @@ WITH RankedJobs AS (
             END AS priority_score
     FROM job_listings jl
     WHERE jl.is_posted = 1
-      AND jl.application_status LIKE '%not applied%'
-      AND (jl.preliminary_score IS NULL OR jl.preliminary_score = 0)
-      AND jl.company IS NOT NULL
-      AND jl.description IS NOT NULL
-      AND TRIM(jl.description) <> ''
-      AND NOT EXISTS (
-        SELECT 1 FROM blacklisted_companies bc
-        WHERE LOWER(jl.company) = LOWER(bc.company)
-    )
-      AND NOT EXISTS (
-        SELECT 1 FROM blacklist bl
-        WHERE bl.type = 'blacklist'
-          AND LOWER(jl.title) LIKE '%' || LOWER(bl.value) || '%'
-          AND NOT EXISTS (
-            SELECT 1 FROM blacklist wl
-            WHERE wl.type = 'whitelist'
-              AND LOWER(jl.title) LIKE '%' || LOWER(wl.value) || '%'
+        AND jl.application_status LIKE '%not applied%'
+        AND (jl.preliminary_score IS NULL) OR (jl.preliminary_score = 0)
+        AND jl.company IS NOT NULL
+        AND jl.description IS NOT NULL
+        AND TRIM(jl.description) <> ''
+        AND NOT EXISTS (
+            SELECT 1 FROM blacklisted_companies bc
+            WHERE LOWER(jl.company) = LOWER(bc.company)
         )
-    )
+        AND NOT EXISTS (
+            SELECT 1 FROM blacklist bl
+            WHERE bl.type = 'blacklist'
+              AND LOWER(jl.title) LIKE '%' || LOWER(bl.value) || '%'
+              AND NOT EXISTS (
+                SELECT 1 FROM blacklist wl
+                WHERE wl.type = 'whitelist'
+                  AND LOWER(jl.title) LIKE '%' || LOWER(wl.value) || '%'
+            )
+        )
 )
 SELECT *,
        (

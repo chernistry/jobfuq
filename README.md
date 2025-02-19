@@ -103,6 +103,8 @@ Edit this file to set up your environment:
 python -m jobfuq.scraper --recipe "scrap,process" --verbose [--hours <num>]
 ```
 
+- **Note:** If you're using stealth scraping more (which, of course, we *hope* you do), it may take up to a minute between launching the scraper and the actual scraping. Don't worry! :)
+
 **Run Separately:**
 
 - **Scraper:**  
