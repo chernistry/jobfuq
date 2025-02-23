@@ -1,0 +1,286 @@
+#######################################
+#           URL SETTINGS              #
+#######################################
+[urls]
+# Base URL for LinkedIn
+base_url = "https://www.linkedin.com"
+# Pattern for search URL; placeholders for keywords, location, and time_filter.
+search_url_pattern = "/jobs/search/?keywords={keywords}&location={location}&f_TPR={time_filter}"
+# Wait state for navigation (e.g., "domcontentloaded")
+wait_until = "domcontentloaded"
+feed_url = "https://www.linkedin.com/feed/"
+login_url = "https://www.linkedin.com/login"
+feed_url_indicator = "linkedin.com/feed"
+ssr_login_indicator = "linkedin.com/ssr-login"
+# Checkpoint indicator used to detect captcha/challenge pages.
+checkpoint_indicator = "checkpoint/challenge"
+
+#######################################
+#         TIMEOUT SETTINGS            #
+#######################################
+[timeouts]
+# Timeout for waiting for selectors (in milliseconds)
+selector_timeout = 60000 # default 30000
+# Timeout for get_text_content (in milliseconds)
+get_text_timeout = 15000 # default 5000
+# Timeout for navigation (in milliseconds)
+navigation_timeout = 50000 # default 20000
+
+#######################################
+#         ATTRIBUTE SETTINGS          #
+#######################################
+[attributes]
+# Attribute names to check for a job's unique ID.
+job_id = ["data-occludable-job-id", "data-job-id", "data-id"]
+
+#######################################
+#         JOBS SETTINGS               #
+#######################################
+[jobs]
+# Selectors for the overall job list container.
+job_list_selectors = [".scaffold-layout__list", ".jobs-search-results"]
+# Selectors to identify individual job cards.
+job_card_selectors = [
+    "li.scaffold-layout__list-item div.job-card-container",
+    "li.jobs-search-results__list-item div.job-card-container",
+    "div.job-card-list__container"
+]
+
+#######################################
+#         CARD SETTINGS               #
+#######################################
+[card]
+# Selectors for extracting minimal info from a job card.
+title_selectors = [
+    "a.job-card-list__title",
+    "div.full-width.artdeco-entity-lockup__title a span strong"
+]
+company_selectors = [
+    "h4.job-card-container__company-name",
+    "span.job-card-container__company-name",
+    "div.job-card-list__company-name",
+    "h3.job-card-list__company-name"
+]
+location_selectors = [
+    "li.job-card-container__metadata-item",
+    "span.job-card-container__metadata-item",
+    ".job-card-list__location"
+]
+snippet_selectors = [
+    "p.job-card-list__snippet",
+    ".job-card-container__snippet"
+]
+applicants_selectors = [
+    "span.job-card-container__applicant-count"
+]
+company_size_selectors = [
+    "span.job-card-company-size"
+]
+
+#######################################
+#         DETAIL SETTINGS             #
+#######################################
+[detail]
+# Selectors for extracting detailed info on the job detail page.
+title_selectors = [
+    "h1.jobs-unified-top-card__job-title",
+    "h1.t-24.t-bold.inline",
+    "div.job-details-jobs-unified-top-card__sticky-header-job-title strong",
+    "h3.job-card-list__title"
+]
+company_selectors = [
+    "a.jobs-unified-top-card__company-url",
+    "div.job-details-jobs-unified-top-card__company-name a",
+    "a[data-test-app-aware-link]"
+]
+location_selectors = [
+    "span.jobs-unified-top-card__bullet",
+    "div.job-details-jobs-unified-top-card__primary-description-container span.tvm__text--low-emphasis",
+    "span.job-card-container__location"
+]
+description_selectors = [
+    "div.jobs-description-content__text",
+    "section.description",
+    "article.jobs-description__container",
+    "div.jobs-box__html-content"
+]
+posted_time_selectors = [
+    "span.posted-time-ago__text",
+    "time[datetime]",
+    "span.tvm__text--positive"
+]
+company_url_selectors = [
+    "a.jobs-unified-top-card__company-url",
+    "div.job-details-jobs-unified-top-card__company-name a"
+]
+company_size_selectors = [
+    "span.jobs-company__inline-information",
+    "div.org-top-card-summary-info-list__info-item"
+]
+applicants_detail_selectors = [
+    "span.jobs-unified-top-card__applicant-count",
+    "span.job-card-container__applicant-count",
+    ".jobs-details-top-card__applicant-count",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping span:has-text('applicant')",
+    "span.tvm__text.tvm__text--low-emphasis",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping"
+]
+
+#######################################
+#      APPLICANTS UPDATE SETTINGS     #
+#######################################
+[applicants_update]
+selectors = [
+    "span.jobs-unified-top-card__applicant-count",
+    "span.job-card-container__applicant-count",
+    ".jobs-details-top-card__applicant-count",
+    "span.jobs-unified-top-card__subtitle-secondary-grouping",
+    "span.tvm__text.tvm__text--low-emphasis",
+    "div.job-details-jobs-unified-top-card__primary-description-container span"
+]
+xpaths = [
+    "(//span[contains(text(), 'applicant')])[1]",
+    "(//span[contains(., 'applicant')])[1]"
+]
+patterns = [
+    "(\\d+)\\s*(?:applicant|candidate|people|person)s?\\b",
+    "(\\d+)\\s*people clicked apply",
+    "Over\\s+(\\d+)",
+    "Be among the first (\\d+) applicants",
+    "(\\d+)\\s*clicked apply"
+]
+closed_application_text = "no longer accepting applications"
+
+#######################################
+#        PAGINATION SETTINGS          #
+#######################################
+[pagination]
+# Selectors for pagination; use {page} as a placeholder to be replaced dynamically.
+selectors = [
+    "button[aria-label='Page {page}']",
+    "a[aria-label='Page {page}']",
+    "button.artdeco-pagination__button--next",
+    "button[aria-label='Next']",
+    "a[aria-label='Next']"
+]
+
+#######################################
+#         BROWSER SETTINGS            #
+#######################################
+[browser_args]
+disable_blink_features = "AutomationControlled"
+disable_web_security = true
+disable_features = "IsolateOrigins,site-per-process"
+window_width_min = 1000
+window_width_max = 1600
+window_height_min = 800
+window_height_max = 1200
+
+#######################################
+#            ENVIRONMENT              #
+#######################################
+[env]
+timezones = ["America/New_York", "Europe/Paris", "Asia/Singapore"]
+
+#######################################
+#        RESOURCE BLOCKING            #
+#######################################
+[resource_blocking]
+types = ["image", "font", "media"]
+
+#######################################
+#         NETWORK PROFILES            #
+#######################################
+[network_profiles]
+profiles = ["Wi-Fi", "Regular4G", "DSL"]
+
+#######################################
+#         MOUSE PHYSICS               #
+#######################################
+[mouse_physics]
+steps_min = 120
+steps_max = 250
+gravity_min = 0.5
+gravity_max = 1.5
+wind_min = -0.5
+wind_max = 0.5
+
+#######################################
+#         FAKE HTTP TRAFFIC           #
+#######################################
+[fake_http]
+url = "https://httpbin.org/get"
+
+#######################################
+#         CAPTCHA SETTINGS            #
+#######################################
+[captcha]
+selector = "#captcha-challenge"
+timeout_ms = 5000
+
+#######################################
+#        BLOCK INDICATORS             #
+#######################################
+[block_indicators]
+selectors = [
+    ["text=unusual activity detected", 0.9],
+    ["#error-for-alerts", 0.7],
+    ["text=security check", 0.8]
+]
+
+#######################################
+#         EVASIVE ACTION              #
+#######################################
+[evasive]
+timeout_ms = 5000
+
+#######################################
+#         COMPANY SETTINGS            #
+#######################################
+[company]
+not_found_selector = 'h1:has-text("Page not found")'
+employee_selector = ".org-top-card-summary-info-list__info-item"
+
+#######################################
+#         COMPANY SIZE MAP            #
+#######################################
+[size_map]
+"1-10" = 1
+"1-10 employees" = 1
+"2-10 employees" = 1
+"2-10" = 1
+"11-50" = 2
+"11-50 employees" = 2
+"51-200" = 3
+"51-200 employees" = 3
+"201-500" = 4
+"201-500 employees" = 4
+"501-1k" = 5
+"501-1,000" = 5
+"501-1,000 employees" = 5
+"501-1000" = 5
+"501-1000 employees" = 5
+"1k-5k" = 6
+"1,001-5,000" = 6
+"1,001-5,000 employees" = 6
+"1001-5000" = 6
+"1001-5000 employees" = 6
+"5k-10k" = 7
+"5,001-10,000" = 7
+"5,001-10,000 employees" = 7
+"5001-10000" = 7
+"5001-10000 employees" = 7
+"10k+" = 8
+"10,001+" = 8
+"10,001+ employees" = 8
+"10K+" = 8
+"10K+ employees" = 8
+"Unknown" = 0  # Default score for unknown sizes
+
+#######################################
+#         LOGIN SETTINGS              #
+#######################################
+[login]
+username_selector = "input#username"
+password_selector = "input#password"
+submit_selector = "button[type='submit']"

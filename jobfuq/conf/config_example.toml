@@ -1,0 +1,156 @@
+#######################################
+#           GENERAL SETTINGS          #
+#######################################
+
+# Only job postings newer than this (in seconds) will be considered.
+time_filter = "604800"      # 7 days
+
+# Number of concurrent job detail pages to process.
+concurrent_details = 7
+
+# Maximum number of job postings to fetch per query.
+max_postings = 1000
+
+# Delay (in seconds) before retrying a failed extraction.
+retry_delay = 180           # 3 minutes
+
+# Run in headless mode.
+headless = true
+# manual_login = true
+
+
+#######################################
+#         DATABASE CONFIGURATION      #
+#######################################
+
+# Path to the SQLite database for storing job listings.
+db_path = "data/job_listings.db"
+
+
+#######################################
+#         SCRAPING SETTINGS           #
+#######################################
+
+[scraping]
+# Options: "aggressive", "normal", or "stealth"
+mode = "stealth"
+
+# List of User-Agent headers for web scraping.
+user_agents = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Safari/605.1.15",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+]
+
+
+#######################################
+#         JOB SEARCH QUERIES          #
+#######################################
+
+[[search_queries]]
+keywords = "DevOps Engineer"
+location = "USA"
+f_WT = "1"    # 1 = On-Site, 2 = Remote, 3 = Hybrid
+
+[[search_queries]]
+keywords = "LLM Engineer"
+location = "Israel"
+f_WT = "1"
+
+[[search_queries]]
+keywords = "Penguin Flipper"
+location = "Canada"
+f_WT = "1"
+
+
+#######################################
+#      LINKEDIN CREDENTIALS (AUTH)    #
+#######################################
+
+[linkedin_credentials]
+
+[linkedin_credentials."1"]
+username = "dummy1@example.com"
+password = "dummy_password_1"
+
+[linkedin_credentials."2"]
+username = "dummy2@example.com"
+password = "dummy_password_2"
+
+
+#######################################
+#   AI PROVIDERS & API CONFIGURATION  #
+#######################################
+
+# Options: "together", "openrouter", or "multi"
+provider_mode = "together"
+
+# Number of concurrent AI evaluations.
+threads = 4
+
+# Together AI provider settings.
+together_api_key = "DUMMY_TOGEATHER_API_KEY"
+
+
+
+# ============================================================================ #
+#                           TOGETHER AI PROVIDER SETTINGS                     #
+# ============================================================================ #
+# Defines the AI model to be used.
+# Recommended models:
+# - `deepseek-ai/DeepSeek-R1`: High accuracy, but slower.
+# - `meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo`: Balanced speed and intelligence.
+# Refer to the docs for further model recommendations.
+
+together_model = "dummy_model/together"
+together_rpm = 60      # Requests per minute
+
+# ============================================================================ #
+#                           OPENROUTER AI PROVIDER SETTINGS                    #
+# ============================================================================ #
+
+# OpenRouter provides multiple free-tier AI models, making it an excellent
+# option for experimentation and cost-effective development.
+# For an up-to-date list of free models, check:
+# https://openrouter.ai/models?max_price=0&order=top-weekly
+#
+# Recommended models:
+# - `deepseek/deepseek-r1:free`: High accuracy but slower.
+# - `meta-llama/llama-3.3-70b-instruct:free`: Faster but lower accuracy
+#   compared to Together 450B.
+#
+# Choose based on your requirements for speed vs. precision.
+
+openrouter_api_keys = [
+  "DUMMY_OPENROUTER_API_KEY_1",
+  "DUMMY_OPENROUTER_API_KEY_2"
+]
+openrouter_model = "dummy_model/openrouter"
+
+
+#######################################
+#      AI PROMPT CONFIGURATION        #
+#######################################
+
+# Path to the prompt template used for AI evaluations.
+prompt = "prompts/deepseek_r1_career_advisor_template.txt"
+
+
+#######################################
+#         DEBUG CONFIGURATION         #
+#######################################
+
+[debug]
+enabled = false
+mode = "single_link"    # Options: "single_link", "search_mode", "rescrape_by_db_query"
+sql_query = '''SELECT * FROM main.job_listings'''
+search_limit = 3
+job_links = [
+  "https://www.linkedin.com/jobs/view/1234567890/",
+  "https://www.linkedin.com/jobs/view/2345678901/"
+]
+save_to_db = true
+timeouts = { aggressive = 2000, normal = 5000, stealth = 8000 }
+log_selectors = true
+force_expand = true
+verbose = true
