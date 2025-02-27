@@ -18,50 +18,73 @@ And if you’ve ever been too honest on your resume? Yeah, **JOBFUQ** saw that. 
 - **Dynamic rate limiting** so you don’t get banned before you even get ignored. 🚦🙈
 
 > **Note:** **JOBFUQ** works (mostly). Setup experience inspired by Kafka, but with swearing. Now with smarter scoring — mind the skill gaps. 🧠⚠️
+
 ---
 
 ## Updated Features & Architecture Overview
+> **Note:** We temporarily simplified the graphics for the scraper output during the refactoring process. Rest assured, a refreshed and polished look is coming back soon!
 
 ### Project Structure
 
-The project now sports a cleaner, modular layout:
+The project now sports a cleaner, more modular layout:
 
 ```
-.
-├── data                     # SQLite databases (e.g., job_listings.db)
-├── docker                   # Docker configurations (coming soon!)
-└── jobfuq
-    ├── conf                 # Configuration files (config.toml, linked_config.toml, SQL examples)
-    ├── models               # AI provider integrations (openrouter.py, together.py)
-    ├── prompts              # Prompt templates for career advice
-    ├── sql                  # SQL queries for DB schema & operations
-    ├── __init__.py          # Package initializer
-    ├── database.py          # Database connection & table creation logic
-    ├── linked_utils.py      # LinkedIn scraping utility functions
-    ├── llm_handler.py       # AI integration & evaluation handler
-    ├── logger.py            # Logging setup and utilities
-    ├── processor.py         # Scoring engine & result display (with snarky ASCII gradients)
-    ├── scraper.py           # Core LinkedIn scraping engine
-    └── utils.py             # Helper functions (e.g., config loading)
+├── CONTRIBUTING.md         # Contribution guidelines for developers
+├── LICENSE                 # Licensing information (CC BY-NC 4.0)
+├── README.md               # This file
+├── assets                  # Assets (e.g., banner image)
+├── data                    # SQLite databases (e.g., job_listings.db)
+├── jobfuq
+│   ├── __init__.py
+│   ├── conf              # Configuration files (config.toml, linked_config.toml, config_example.toml)
+│   ├── database          # Database logic and SQL queries
+│   │   ├── __init__.py
+│   │   ├── database.py   # Database connection & table creation logic
+│   │   └── sql           # SQL query files for schema and operations
+│   ├── graphics          # Graphical output utilities (e.g., ASCII gradients)
+│   │   ├── __init__.py
+│   │   └── graphics.py
+│   ├── llm               # AI integration layer
+│   │   ├── __init__.py
+│   │   ├── ai_model.py   # AI model integration & evaluation logic
+│   │   ├── evaluator.py  # Evaluates job fit using AI
+│   │   ├── provider_manager.py  # Manages provider selection (together, openrouter, multi)
+│   │   └── models        # AI provider integrations (openrouter.py, together.py)
+│   ├── logger            # Logging setup and utilities
+│   │   ├── __init__.py
+│   │   └── logger.py
+│   ├── processing        # Scoring engine & result display
+│   │   ├── __init__.py
+│   │   └── processor.py  # Processes and ranks jobs using a two-pass AI evaluation:
+│   │                      # - First pass: preliminary scoring using a lightweight model.
+│   │                      # - Second pass (rescoring): Top vacancies are re-evaluated in-depth.
+│   ├── prompts           # Prompt templates for career advice
+│   │   ├── deepseek_r1_career_advisor_template.txt
+│   │   └── examples      # Sample prompts for various job roles
+│   ├── scraper           # LinkedIn scraping engine
+│   │   ├── __init__.py
+│   │   ├── orchestrator.py  # Orchestrates scraping flows
+│   │   ├── flows         # Modular flows: search, details, update
+│   │   └── core          # Core scraping utilities (scraper.py, linked_utils.py, filter.py)
+│   └── utils             # Helper functions (e.g., config loading)
+└── session_store         # Saved sessions for LinkedIn accounts
 ```
 
 ### What’s New?
 
-- **Updated Configuration:** The main config file (`jobfuq/conf/config.toml`) now includes settings such as `time_filter`, `concurrent_details`, `max_postings`, `retry_delay`, and `headless` mode.
-- **LinkedIn Scraping Enhancements:** With refined selectors in `jobfuq/conf/linked_config.toml` and improved stealth techniques (randomized mouse physics, dynamic viewport resizing, fake HTTP traffic, etc.).
-- **Database Schema Overhaul:** New SQL files in `jobfuq/sql` include:
-  - `create_blacklist_table.sql`
-  - `create_blacklisted_companies_table.sql`
-  - `create_job_listings_table.sql`
-  - `update_job_scores.sql`
-  - And more!
-- **AI Provider Integration:** Choose between **Together.ai** and **OpenRouter** or run both in multi-provider mode. Configuration options reside in the `[ai_providers]` section.
-- **Enhanced Scoring Engine:** The scoring formula (in `jobfuq/processor.py`) now factors in recency, company size, and a slew of AI-evaluated metrics.
-- **Robust Error Handling & Retry Logic:** With rate-limit updates and manual captcha handling built into `jobfuq/linked_utils.py`.
+- **Fully Free AI via OpenRouter:** Now you can use the AI integration entirely for free through OpenRouter, removing previous usage restrictions.
+- **Two-Pass Scoring System:**
+    - **First Pass:** A lighter, preliminary model quickly scores all scraped jobs.
+    - **Second Pass (Rescoring):** Top vacancies are then re-evaluated in-depth using a more advanced model for improved accuracy.
+- **Enhanced Configuration Defaults:** Updated `config.toml` now features a longer `time_filter` (e.g., "2419200" for 4 weeks), reduced `concurrent_details`, and a lower `max_postings` value.
+- **LinkedIn Scraping Enhancements:** Refined selectors in `linked_config.toml` and improved stealth techniques (randomized mouse physics, dynamic viewport resizing, fake HTTP traffic, etc.).
+- **Database Schema Overhaul:** Additional SQL scripts now manage blacklist tables and support the two-pass scoring workflow.
+- **Modular Scraping Flows:** Refactored into distinct flows (search, details, update) managed by the orchestrator for better process control.
 
 ---
 
-## 🚀 Quickstart
+## 🚀 So-called "Quick" start
+For now, this process may seem a bit manual—especially in adjusting filters to avoid unwanted jobs. We plan to simplify the process in future releases, but for now, it is what it is.
 
 ### 1️⃣ Clone & Install Dependencies
 
@@ -79,11 +102,11 @@ playwright install
 Edit this file to set up your environment:
 
 - **linkedin_credentials:** Add one or more LinkedIn logins.
-- **search_queries:** Define your target job keywords, locations, and filters.
+- **search_queries:** Define your target job keywords, locations, and filters. **Note:** Adjust the filter settings to exclude jobs you want to avoid.
 - **ai_providers:** Configure your AI provider mode (`"together"`, `"openrouter"`, or `"multi"`), API keys, and models.
-- **prompt:** Path to your custom career prompt (e.g., `prompts/deepsek_r1_career_career_advisor_devops.txt`).
+- **prompt:** Path to your custom career prompt (e.g., `prompts/deepseek_r1_career_advisor_template.txt`).
 - **scraping:** Set the mode (`stealth`, `normal`, or `aggressive`) and other options like `user_agents`.
-- **time_filter:** Use a relative time filter (e.g., `"1209600"` for 2 weeks) to limit postings.
+- **time_filter:** Use a relative time filter (e.g., `"2419200"` for 4 weeks) to limit postings.
 - **max_postings:** The maximum number of jobs to scrape per query.
 - **headless:** Toggle headless mode for browser automation.
 
@@ -97,29 +120,36 @@ Edit this file to set up your environment:
 
 ### 4️⃣ Run JOBFUQ
 
-**Combined Scrape & Process (Recommended):**
+**Combined Flows (Recommended):**
 
 ```bash
+python -m jobfuq.scraper.orchestrator --recipe "search+details+update" --verbose [--hours <num>]
 ```
 
-- **Note:** If you're using stealth scraping more (which, of course, we *hope* you do), it may take up to a minute between launching the scraper and the actual scraping. Don't worry! :)
 
-**Run Separately:**
+**Combined Flows (Recommended):**
 
-- **Scraper:**  
+```bash
+python -m jobfuq.scraper.orchestrator --recipe "search+details+update" --verbose [--hours <num>]
+```
+
+- **Run Separately:**
+
+- **Scraper:**
   ```bash
+  python -m jobfuq.scraper.orchestrator [--manual-login] [--debug-single] [--endless] [--verbose] [--hours <num>]
   ```
 
-- **Processor:**  
+- **Processor (Two-Pass Scoring):**
   ```bash
-  python -m jobfuq.processor [config_path] [--verbose] [--endless] [--threads <num>]
+  python -m jobfuq.processing.processor [config_path] [--verbose] [--endless] [--threads <num>] [--recipe scoring/rescoring/all]
   ```
 
 > **Tip:** Use the `--hours <num>` flag to limit results to jobs posted within the last `<num>` hours.
 
 ### 5️⃣ Inspect & Query Your Results
 
-- All scraped jobs are stored in the SQLite database located at `data/job_listings.db`.
+- All scraped jobs are stored in the SQLite database located at the path specified in your config (e.g., `data/job_listings.db`).
 - Use your favorite SQLite GUI (e.g., DB Browser for SQLite, DBeaver, or SQLiteStudio) to inspect the data.
 
 ---
@@ -129,8 +159,6 @@ Edit this file to set up your environment:
 ### Key Tables:
 
 - **job_listings:** Stores all job data along with evaluation metrics.
-- **blacklist:** Contains keywords or companies to exclude from results.
-- **blacklisted_companies:** Specific companies that are banned from scraping.
 
 ### Notable Fields in `job_listings`:
 
@@ -139,8 +167,7 @@ Edit this file to set up your environment:
 - `company_size` & `company_size_score`
 - `job_url`, `date`, `listed_at`
 - AI-evaluated metrics: `skills_match`, `model_fit_score`, `preliminary_score`, `success_probability`, `role_complexity`, `effort_days_to_fit`, `critical_skill_mismatch_penalty`, `experience_gap`
-- `overall_relevance`, `last_checked`, `last_reranked`, `application_status`
-
+- `last_checked`, `last_reranked`, `is_posted`, `application_status`
 
 ---
 
@@ -151,23 +178,14 @@ Edit this file to set up your environment:
 The `[ai_providers]` section in `config.toml` lets you choose between:
 
 - **together:** Runs models via Together.ai (e.g., `Meta-Llama-3.1-405B-Instruct-Turbo`).
-- **openrouter:** Allows you to use OpenRouter’s free endpoints (e.g., `deepseek/deepseek-r1:free`) –
-  or go for paid ones if you want better performance.
+- **openrouter:** Now supports fully free usage for AI evaluation (e.g., `deepseek/deepseek-r1:free`).
 - **multi:** Alternates between providers for load balancing.
 
-> **Note:** The **multi** mode is highly experimental and prone to errors. If you're feeling brave,
-> fork it and improve it. Otherwise, it's safer to stick to a single provider.
->
-> If you're on a budget, here are some solid free options:
->
-> - `openrouter/meta-llama/llama-3.3-70b-instruct:free` – fast, decent intelligence.
-> - `deepseek/deepseek-r1-distill-llama-70b:free` – more thoughtful, but still efficient.
-> - `deepseek/deepseek-r1:free` – slow as hell on the free tier, but hey, it's **R1**.
+> **Note:** The **multi** mode is experimental. If you’re feeling brave, fork it and improve it; otherwise, stick to a single provider.
 
 Example configuration:
 
 ```toml
-[Example AI Provider Config]
 [ai_providers]
 provider_mode = "together"
 threads = 4
@@ -177,24 +195,25 @@ together_rpm = 58
 prompt = "prompts/deepseek_r1_career_advisor_template.txt"
 ```
 
-### Evaluation Workflow
+### Two-Pass Evaluation Workflow
 
-- The AI model evaluates each job based on a custom prompt that includes:
-  - Company, Title, Location, and Job Description.
-- **Scoring Metrics** include:
-  - `skills_match`
-  - `experience_gap`
-  - `model_fit_score`
-  - `success_probability`
-  - `role_complexity`
-  - `effort_days_to_fit`
-  - `critical_skill_mismatch_penalty`
+- **First Pass (Preliminary Scoring):**
+    - A lightweight model quickly scores all scraped jobs.
+- **Second Pass (Rescoring):**
+    - Top vacancies (as identified by the preliminary pass) are re-evaluated in-depth by a more advanced model.
+    - This results in more accurate and reliable job fit assessments.
 
-- The final **Preliminary Score** is computed in `jobfuq/processor.py` using:
-  - A penalty for experience gaps and critical mismatches.
-  - Adjustments for recency and company size.
+### Scoring Metrics
 
-- Results are displayed in a snarky ASCII gradient output for your viewing pleasure.
+- **Skills Match:** Alignment between candidate skills and job requirements.
+- **Experience Gap:** Difference between candidate experience and role expectations.
+- **Model Fit Score:** AI’s overall evaluation of job suitability.
+- **Success Probability:** Likelihood of landing the job.
+- **Role Complexity:** Demands of the position.
+- **Effort Days to Fit:** Estimated days to bridge skill gaps.
+- **Critical Skill Mismatch Penalty:** Penalties for missing key qualifications.
+
+The final **Preliminary Score** is computed in `jobfuq/processing/processor.py` using these metrics, with adjustments for recency and company size.
 
 ---
 
@@ -203,26 +222,24 @@ prompt = "prompts/deepseek_r1_career_advisor_template.txt"
 ### Configuration Files
 
 - **Main Config:** `jobfuq/conf/config.toml`
-   - Controls scraping behavior, AI provider settings, and database paths.
+    - Controls scraping behavior, AI provider settings, and database paths.
 - **LinkedIn Config:** `jobfuq/conf/linked_config.toml`
-   - Contains detailed selectors and browser options for LinkedIn scraping.
-- **SQL Queries:** Located in `jobfuq/sql/`
-   - Modify these if you need to adjust the schema or query logic.
+    - Contains selectors, pagination rules, and stealth settings for LinkedIn scraping.
+- **SQL Queries:** Located in `jobfuq/database/sql/`
+    - Modify these if you need to adjust the schema or query logic.
 
 ### Customizable Options
 
-- **Scraping Mode:**  
-  - Options: `"stealth"` (default), `"normal"`, or `"aggressive"`.
-- **User Agents:**  
-  - A list of modern browser signatures to reduce detection.
-- **Timeouts & Delays:**  
-  - Adjust `selector_timeout`, `get_text_timeout`, and `retry_delay` to fine-tune performance.
-- **Session Management:**  
-  - Sessions are stored in the `session_store` directory. Use manual login (`--manual-login`) if needed.
-
-### Modifying Scoring Factors
-
-All scoring logic is in `jobfuq/processor.py` and can be modified there if you’re feeling brave.
+- **Scraping Mode:**
+    - Options: `"stealth"` (default), `"normal"`, or `"aggressive"`.
+- **User Agents:**
+    - A list of modern browser signatures to reduce detection.
+- **Timeouts & Delays:**
+    - Adjust `selector_timeout`, `get_text_timeout`, and `retry_delay` to fine-tune performance.
+- **Session Management:**
+    - Sessions are stored in the `session_store` directory. Use manual login (`--manual-login`) if needed.
+- **Two-Pass Scoring Parameters:**
+    - Configure thresholds and model-specific settings for both the preliminary and rescoring passes.
 
 ---
 
@@ -235,7 +252,7 @@ JOBFUQ now comes equipped with a range of anti-detection measures:
 - **Fake HTTP Traffic Generation:** Keeps your scraping footprint under the radar.
 - **Manual Captcha Handling:** Automatically switches to headful mode when necessary.
 
-All these features are implemented in `jobfuq/linked_utils.py` and can be fine-tuned via `linked_config.toml`.
+All these features are implemented in `jobfuq/scraper/core/linked_utils.py` and can be fine-tuned via `jobfuq/conf/linked_config.toml`.
 
 ---
 
@@ -243,21 +260,13 @@ All these features are implemented in `jobfuq/linked_utils.py` and can be fine-t
 
 ### Output Metrics
 
-- **Preliminary Score:** Overall job fit (0-100).
+- **Preliminary Score:** Overall job fit from the first pass.
+- **Rescored Value:** Final, in-depth evaluation after the second pass.
 - **Skills Match:** How well your skills align.
-- **Model Fit Score:** LLM’s evaluation of job suitability.
+- **Model Fit Score:** AI’s evaluation of job suitability.
 - **Success Probability:** Your chance of landing the job.
 - **Effort Days to Fit:** Estimated days to bridge any skill gaps.
 - **Critical Skill Mismatch Penalty:** Higher values indicate bigger gaps.
-
-### ASCII Gradient Visualization
-
-The processor displays results using an ASCII gradient:
-
-- Red blocks indicate poor scores.
-- Green blocks indicate strong alignment.
-
-This visual output is handled by `jobfuq/processor.py` and is as aesthetically pleasing as it is brutally honest.
 
 ---
 
@@ -268,6 +277,7 @@ This visual output is handled by `jobfuq/processor.py` and is as aesthetically p
 Run the scraper or processor in an endless loop with the `--endless` flag:
 
 ```bash
+python -m jobfuq.scraper.orchestrator --endless --verbose
 ```
 
 ### Debug Mode
@@ -275,6 +285,7 @@ Run the scraper or processor in an endless loop with the `--endless` flag:
 For debugging a single job, use:
 
 ```bash
+python -m jobfuq.scraper.orchestrator --debug-single [job_URL]
 ```
 
 This is perfect if you just want to see what’s wrong with a particular posting.
@@ -290,7 +301,7 @@ This is perfect if you just want to see what’s wrong with a particular posting
 - **Update Job Scores:** Writes the AI evaluation back to the database.
 - **Blacklist Checks:** Ensures unwanted jobs are filtered out.
 
-All SQL files are located in `jobfuq/sql/` and are loaded dynamically by `jobfuq/database.py`.
+All SQL files are located in `jobfuq/database/sql/` and are dynamically loaded by the database module.
 
 ---
 
@@ -298,11 +309,11 @@ All SQL files are located in `jobfuq/sql/` and are loaded dynamically by `jobfuq
 
 | **Problem**                   | **Solution**                                                                                  |
 |-------------------------------|-----------------------------------------------------------------------------------------------|
-| **Playwright Errors**         | Ensure Playwright is installed (`playwright install`) and check your network connection.       |
-| **Login Failures**            | Double-check your `linkedin_credentials` in `config.toml` or try `--manual-login`.             |
-| **Captcha/Checkpoint Issues** | If captcha appears in headless mode, the tool switches to headful mode. Solve it manually.      |
+| **Playwright Errors**         | Ensure Playwright is installed (`playwright install`) and verify your network connection.       |
+| **Login Failures**            | Check your `linkedin_credentials` in `config.toml` or try running with `--manual-login`.         |
+| **Captcha/Checkpoint Issues** | If a captcha appears in headless mode, the tool automatically switches to headful mode for manual solving. |
 | **AI Provider Rate Limits**   | Verify your API keys and adjust `together_rpm`/`openrouter_rpm` in your config as needed.       |
-| **Database Lock Issues**      | Make sure `data/job_listings.db` isn’t open in another application (like a SQLite browser).     |
+| **Database Lock Issues**      | Ensure the database (e.g., `data/job_listings.db`) isn’t open in another application.            |
 | **Timeouts/Skipped Jobs**     | Increase timeout values in `config.toml` or run with `--verbose` to diagnose the issue.         |
 
 ---
@@ -311,8 +322,8 @@ All SQL files are located in `jobfuq/sql/` and are loaded dynamically by `jobfuq
 
 ### Free Use (OpenRouter)
 
-- **OpenRouter (Free):** Limited to around 20 req/hr and 200 req/day. Watch those limits!
-- Upgrade or switch to Together.ai if you need more capacity.
+- **OpenRouter (Free):** Use the fully free AI endpoint (e.g., `deepseek/deepseek-r1:free`) with no cost, subject to API usage limits.
+- Upgrade or switch to Together.ai if you require higher throughput or additional features.
 
 ### Model Pricing (Per Million Tokens)
 
@@ -329,25 +340,26 @@ All SQL files are located in `jobfuq/sql/` and are loaded dynamically by `jobfuq
 
 ### How to Contribute
 
-- **Fork & Branch:**  
+- **Fork & Branch:**
   ```bash
   git checkout -b feature/your-idea
   ```
-- **Commit & Push:** Open a pull request and explain your changes.
-- **Keep it Real:** Retain the original sarcastic tone—if it says “bum”, let it be bum.
+- **Commit & Push:** Open a pull request and describe your changes.
+- **Keep it Real:** Maintain the original sarcastic tone. If it says “bum,” let it be bum.
 
 ### Developer Tips
 
-- All configurations and prompt templates are editable.  
-- Review `jobfuq/processor.py` and `jobfuq/llm_handler.py` for scoring logic.
-- Check the SQL files in `jobfuq/sql/` for database schema changes.
-- The logging in `jobfuq/logger.py` is your friend—set `--verbose` for more insights.
+- All configurations and prompt templates are editable.
+- Review `jobfuq/processing/processor.py` and the modules under `jobfuq/llm/` (especially `ai_model.py` and `provider_manager.py`) for scoring and AI logic.
+- Check SQL files in `jobfuq/database/sql/` for schema changes.
+- Explore the modular scraping flows in `jobfuq/scraper/flows` and core utilities in `jobfuq/scraper/core` for scraping enhancements.
+- The logging in `jobfuq/logger/logger.py` is your friend—set `--verbose` for more insights.
 
 ### Upcoming Enhancements
 
-- Expanded job site integrations (Indeed, Glassdoor, etc.).
+- Expanded job site integrations (e.g., Indeed, Glassdoor).
 - Docker Compose setup for one-command deployment.
-- Alternative LLM support (Mistral, Claude, etc.) for better AI evaluations.
+- Alternative LLM support (Mistral, Claude, etc.) for improved AI evaluations.
 - A web-based UI to manage scraping and view results.
 
 ---
@@ -371,7 +383,7 @@ Here are some tools to inspect your `job_listings.db`:
 
 ## 📬 Contact & Support
 
-- **Email:** For job seekers and contributors, drop a line at [endless@loop.in.net](mailto:endless@loop.in.net).
+- **Email:** For job seekers and contributors, contact [endless@loop.in.net](mailto:endless@loop.in.net).
 - **GitHub Issues:** Report bugs or request features on the repository’s Issues page.
 
 > **Disclaimer:** Use JOBFUQ at your own risk. Scraping LinkedIn may violate their terms—so don’t blame us if you get banned.
@@ -393,37 +405,39 @@ Now go forth and get employed — or at least pretend you tried. 🏆
 ## Appendix: Detailed File References
 
 - **jobfuq/conf/config.toml:** Main configuration for scraping, AI integration, and database settings.
-- **jobfuq/conf/linked_config.toml:** Contains LinkedIn URL patterns, selectors, pagination, and stealth settings.
-- **jobfuq/sql/**: All SQL queries are here. Modify these files if you need to change the database schema.
-- **jobfuq/models/openrouter.py & together.py:** The implementation of AI provider wrappers.
-- **jobfuq/llm_handler.py:** Manages provider selection, prompt creation, and AI response parsing.
-- **jobfuq/processor.py:** Contains the scoring algorithm, ASCII visualization, and main processing loop.
-- **jobfuq/scraper.py:** Implements the LinkedIn job scraping logic with robust stealth features.
-- **jobfuq/linked_utils.py:** Houses helper functions for browser automation and anti-detection techniques.
-- **jobfuq/database.py:** Manages SQLite connections, table creation, and SQL query loading.
-- **jobfuq/utils.py:** A small utility module for loading TOML configurations.
+- **jobfuq/conf/linked_config.toml:** Contains selectors, pagination rules, and stealth settings for LinkedIn scraping.
+- **jobfuq/database:** Manages SQLite connections, table creation, and SQL query loading (see `jobfuq/database/sql/`).
+- **jobfuq/llm:** AI integration layer (includes `ai_model.py`, `provider_manager.py`, and models in `jobfuq/llm/models/`).
+- **jobfuq/logger/logger.py:** Logging setup and utilities.
+- **jobfuq/processing/processor.py:** Contains the scoring algorithm, ASCII visualization, and two-pass job ranking logic.
+- **jobfuq/scraper/orchestrator.py:** Orchestrates scraping flows.
+- **jobfuq/scraper/flows:** Houses distinct scraping flows (search, details, update).
+- **jobfuq/scraper/core:** Core scraping functions and utilities (including LinkedIn-specific modules).
+- **jobfuq/prompts:** Contains prompt templates for career evaluations and sample prompts.
+- **jobfuq/utils:** Helper functions for configuration loading and miscellaneous tasks.
 
 ---
 
 ## Changelog
 
-- **v2.0:**  
-  - Overhauled directory structure for better modularity.
-  - Improved anti-detection features in scraping.
-  - Integrated multiple AI providers with dynamic switching.
-  - Enhanced scoring algorithm with recency and company size factors.
+- **v2.0:**
+    - Overhauled directory structure for enhanced modularity.
+    - Introduced a two-pass scoring system with preliminary scoring and in-depth rescoring.
+    - Fully integrated free AI usage via OpenRouter.
+    - Refactored scraping engine into dedicated flows under `jobfuq/scraper/flows` and added an orchestrator.
+    - Updated configuration defaults (e.g., extended `time_filter`, reduced `max_postings`).
 
-- **v1.9:**  
-  - Updated SQL schema with new fields.
-  - Added manual captcha handling and session management.
-  - Improved logging and error handling.
+- **v1.9:**
+    - Updated SQL schema with new fields.
+    - Added manual captcha handling and session management.
+    - Improved logging and error handling.
 
 ---
 
 ## License & Ethics
 
-- **License:** CC BY-NC 4.0 — Free for non-commercial use.  
-- **Ethical Scraping:** JOBFUQ is built with rate limiting and delays to minimize impact on target websites.
+- **License:** CC BY-NC 4.0 — Free for non-commercial use.
+- **Ethical Scraping:** JOBFUQ is designed with rate limiting and delays to minimize impact on target websites.
 - **Data Privacy:** No personal data is stored. Use responsibly.
 
 ---
@@ -435,4 +449,3 @@ Remember: JOBFUQ is as much a tool as it is a statement—a no-nonsense, brutall
 If you love it, fork it. If you hate it, fork it anyway and fix what’s broken.
 
 Happy job hunting!
-
