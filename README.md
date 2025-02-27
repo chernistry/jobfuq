@@ -123,14 +123,14 @@ Edit this file to set up your environment:
 **Combined Flows (Recommended):**
 
 ```bash
-python -m jobfuq.scraper.orchestrator --recipe "search+details+update" --verbose [--hours <num>]
+python -m jobfuq.scraper.orchestrator --recipe "search+details" --verbose [--hours <num>]
 ```
 
 
 **Combined Flows (Recommended):**
 
 ```bash
-python -m jobfuq.scraper.orchestrator --recipe "search+details+update" --verbose [--hours <num>]
+python -m jobfuq.scraper.orchestrator --recipe "search+details" --verbose [--hours <num>]
 ```
 
 - **Run Separately:**
