@@ -1,56 +1,36 @@
-#######################################
-#           URL SETTINGS              #
-#######################################
 [urls]
-# Base URL for LinkedIn
 base_url = "https://www.linkedin.com"
-# Pattern for search URL; placeholders for keywords, location, and time_filter.
 search_url_pattern = "/jobs/search/?keywords={keywords}&location={location}&f_TPR={time_filter}"
-# Wait state for navigation (e.g., "domcontentloaded")
 wait_until = "domcontentloaded"
 feed_url = "https://www.linkedin.com/feed/"
 login_url = "https://www.linkedin.com/login"
 feed_url_indicator = "linkedin.com/feed"
 ssr_login_indicator = "linkedin.com/ssr-login"
-# Checkpoint indicator used to detect captcha/challenge pages.
 checkpoint_indicator = "checkpoint/challenge"
 
-#######################################
-#         TIMEOUT SETTINGS            #
-#######################################
 [timeouts]
-# Timeout for waiting for selectors (in milliseconds)
 selector_timeout = 60000 # default 30000
-# Timeout for get_text_content (in milliseconds)
-get_text_timeout = 15000 # default 5000
-# Timeout for navigation (in milliseconds)
+get_text_timeout = 35000 # default 5000
 navigation_timeout = 50000 # default 20000
 
-#######################################
-#         ATTRIBUTE SETTINGS          #
-#######################################
+## PATCH START: Added small retry params (used by linkedin_scraper.py)
+smart_retry_attempts = 2
+smart_retry_sleep_min = 1
+smart_retry_sleep_max = 3
+## PATCH END
+
 [attributes]
-# Attribute names to check for a job's unique ID.
 job_id = ["data-occludable-job-id", "data-job-id", "data-id"]
 
-#######################################
-#         JOBS SETTINGS               #
-#######################################
 [jobs]
-# Selectors for the overall job list container.
 job_list_selectors = [".scaffold-layout__list", ".jobs-search-results"]
-# Selectors to identify individual job cards.
 job_card_selectors = [
     "li.scaffold-layout__list-item div.job-card-container",
     "li.jobs-search-results__list-item div.job-card-container",
     "div.job-card-list__container"
 ]
 
-#######################################
-#         CARD SETTINGS               #
-#######################################
 [card]
-# Selectors for extracting minimal info from a job card.
 title_selectors = [
     "a.job-card-list__title",
     "div.full-width.artdeco-entity-lockup__title a span strong"
@@ -77,11 +57,7 @@ company_size_selectors = [
     "span.job-card-company-size"
 ]
 
-#######################################
-#         DETAIL SETTINGS             #
-#######################################
 [detail]
-# Selectors for extracting detailed info on the job detail page.
 title_selectors = [
     "h1.jobs-unified-top-card__job-title",
     "h1.t-24.t-bold.inline",
@@ -126,9 +102,6 @@ applicants_detail_selectors = [
     "span.jobs-unified-top-card__subtitle-secondary-grouping"
 ]
 
-#######################################
-#      APPLICANTS UPDATE SETTINGS     #
-#######################################
 [applicants_update]
 selectors = [
     "span.jobs-unified-top-card__applicant-count",
@@ -151,11 +124,7 @@ patterns = [
 ]
 closed_application_text = "no longer accepting applications"
 
-#######################################
-#        PAGINATION SETTINGS          #
-#######################################
 [pagination]
-# Selectors for pagination; use {page} as a placeholder to be replaced dynamically.
 selectors = [
     "button[aria-label='Page {page}']",
     "a[aria-label='Page {page}']",
@@ -164,9 +133,6 @@ selectors = [
     "a[aria-label='Next']"
 ]
 
-#######################################
-#         BROWSER SETTINGS            #
-#######################################
 [browser_args]
 disable_blink_features = "AutomationControlled"
 disable_web_security = true
@@ -176,27 +142,16 @@ window_width_max = 1600
 window_height_min = 800
 window_height_max = 1200
 
-#######################################
-#            ENVIRONMENT              #
-#######################################
 [env]
 timezones = ["America/New_York", "Europe/Paris", "Asia/Singapore"]
 
-#######################################
-#        RESOURCE BLOCKING            #
-#######################################
 [resource_blocking]
 types = ["image", "font", "media"]
 
-#######################################
-#         NETWORK PROFILES            #
-#######################################
 [network_profiles]
-profiles = ["Wi-Fi", "Regular4G", "DSL"]
+#profiles = ["Wi-Fi", "Regular4G", "DSL"]
+profiles = ["Wi-Fi"]
 
-#######################################
-#         MOUSE PHYSICS               #
-#######################################
 [mouse_physics]
 steps_min = 120
 steps_max = 250
@@ -205,22 +160,13 @@ gravity_max = 1.5
 wind_min = -0.5
 wind_max = 0.5
 
-#######################################
-#         FAKE HTTP TRAFFIC           #
-#######################################
 [fake_http]
 url = "https://httpbin.org/get"
 
-#######################################
-#         CAPTCHA SETTINGS            #
-#######################################
 [captcha]
 selector = "#captcha-challenge"
 timeout_ms = 5000
 
-#######################################
-#        BLOCK INDICATORS             #
-#######################################
 [block_indicators]
 selectors = [
     ["text=unusual activity detected", 0.9],
@@ -228,22 +174,13 @@ selectors = [
     ["text=security check", 0.8]
 ]
 
-#######################################
-#         EVASIVE ACTION              #
-#######################################
 [evasive]
 timeout_ms = 5000
 
-#######################################
-#         COMPANY SETTINGS            #
-#######################################
 [company]
 not_found_selector = 'h1:has-text("Page not found")'
 employee_selector = ".org-top-card-summary-info-list__info-item"
 
-#######################################
-#         COMPANY SIZE MAP            #
-#######################################
 [size_map]
 "1-10" = 1
 "1-10 employees" = 1
@@ -277,9 +214,6 @@ employee_selector = ".org-top-card-summary-info-list__info-item"
 "10K+ employees" = 8
 "Unknown" = 0  # Default score for unknown sizes
 
-#######################################
-#         LOGIN SETTINGS              #
-#######################################
 [login]
 username_selector = "input#username"
 password_selector = "input#password"

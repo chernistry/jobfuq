@@ -1,0 +1,1 @@
+SELECT 1 FROM job_listings WHERE job_url = ? LIMIT 1;

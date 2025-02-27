@@ -100,7 +100,6 @@ Edit this file to set up your environment:
 **Combined Scrape & Process (Recommended):**
 
 ```bash
-python -m jobfuq.scraper --recipe "scrap,process" --verbose [--hours <num>]
 ```
 
 - **Note:** If you're using stealth scraping more (which, of course, we *hope* you do), it may take up to a minute between launching the scraper and the actual scraping. Don't worry! :)
@@ -109,7 +108,6 @@ python -m jobfuq.scraper --recipe "scrap,process" --verbose [--hours <num>]
 
 - **Scraper:**  
   ```bash
-  python -m jobfuq.scraper [--manual-login] [--debug-single] [--endless] [--verbose] [--hours <num>]
   ```
 
 - **Processor:**  
@@ -270,7 +268,6 @@ This visual output is handled by `jobfuq/processor.py` and is as aesthetically p
 Run the scraper or processor in an endless loop with the `--endless` flag:
 
 ```bash
-python -m jobfuq.scraper --endless --verbose
 ```
 
 ### Debug Mode
@@ -278,7 +275,6 @@ python -m jobfuq.scraper --endless --verbose
 For debugging a single job, use:
 
 ```bash
-python -m jobfuq.scraper --debug-single [job_URL]
 ```
 
 This is perfect if you just want to see what’s wrong with a particular posting.
